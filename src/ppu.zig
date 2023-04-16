@@ -65,23 +65,6 @@ pub const Ppu = struct {
             .in_vblank = false,
         };
     }
-    pub fn reset(self: *Ppu) void {
-        self.oam = [_]u8{0} ** 256;
-        self.pal = [_]u8{0} ** 32;
-        self.ctrl = 0;
-        self.mask = 0;
-        self.status = 0;
-        self.oam_addr = 0;
-        self.ppu_addr = 0;
-        self.ppu_addr_hi = 0;
-        self.ppu_data_buf = 0;
-        self.scroll_x = 0;
-        self.scroll_y = 0;
-        self.ppu_latch = false;
-        self.cycle = 0;
-        self.in_vblank = false;
-    }
-
     pub fn nmi(self: *Ppu) bool {
         return (self.status >> 7 == 1) and (self.ctrl >> 7 == 1);
     }

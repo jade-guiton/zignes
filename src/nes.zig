@@ -52,6 +52,7 @@ pub const Nes = struct {
         },
     },
     old_nmi: bool,
+    old_irq: bool,
     cpu_cycle: u64,
     page_crossed: bool,
     found_nyi: bool,
@@ -59,7 +60,7 @@ pub const Nes = struct {
     trace: bool,
 
     pub fn init(cart: Cart) Nes {
-        return Nes{
+        var nes = Nes{
             .cart = cart,
             .ppu = Ppu.init(cart),
             .apu = Apu.init(),
@@ -81,23 +82,18 @@ pub const Nes = struct {
                 },
             },
             .old_nmi = false,
+            .old_irq = false,
             .cpu_cycle = 0,
             .page_crossed = false,
             .found_nyi = false,
             .master_cycle = 0,
             .trace = false,
         };
-    }
 
-    pub fn reset(self: *Nes) void {
-        self.reg.p.i = true;
-        self.reg.pc = self.read16_cycle(0xfffc);
-        self.old_nmi = false;
-        self.cpu_cycle = 7;
-        self.master_cycle = 0;
-        self.found_nyi = false;
-        self.ppu.reset();
-        self.apu.reset();
+        nes.reg.pc = nes.read16_cycle(0xfffc);
+        nes.cpu_cycle = 7;
+
+        return nes;
     }
 
     fn op_nyi(self: *Nes, op: u8) void {
@@ -313,14 +309,16 @@ pub const Nes = struct {
 
     fn run_cpu_step(self: *Nes) void {
         const nmi_line: bool = self.ppu.nmi();
-        const trigger_nmi = nmi_line and !self.old_nmi;
+        if (nmi_line and !self.old_nmi) {
+            self.interrupt(true, false);
+        }
         self.old_nmi = nmi_line;
 
-        // const irq: bool = false;
-        // if (irq and !self.reg.p.i) {
-        //     self.interrupt(false, false);
-        //     return;
-        // }
+        const irq: bool = self.apu.irq;
+        if (irq and !self.reg.p.i) {
+            self.interrupt(false, false);
+            return;
+        }
 
         if (self.trace) {
             std.debug.print("A={X:0>2} X={X:0>2} Y={X:0>2} P={X:0>2} S={X:0>2}  ${X:0>4}: ", .{ self.reg.a, self.reg.x, self.reg.y, self.get_flags_byte(false), self.reg.s, self.reg.pc });
@@ -579,10 +577,6 @@ pub const Nes = struct {
         if (self.cpu_cycle < start_cycle + 2) { // instructions take at least 2 cycles
             self.cpu_cycle = start_cycle + 2;
         }
-
-        if (trigger_nmi) {
-            self.interrupt(true, false);
-        }
     }
 
     pub fn run_cycle(nes: *Nes) void {
@@ -593,7 +587,7 @@ pub const Nes = struct {
         if (nes.ppu.cycle * 4 < nes.master_cycle) {
             nes.ppu.run_step();
         }
-        if (nes.apu.cycle * 24 < nes.master_cycle) {
+        if (nes.apu.cycle * 12 < nes.master_cycle) {
             nes.apu.run_step();
         }
         if (nes.apu.samples * 486 < nes.master_cycle) {

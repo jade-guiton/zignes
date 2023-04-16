@@ -115,7 +115,6 @@ pub fn main() !u8 {
     };
     defer cart.deinit(alloc);
     var nes = Nes.init(cart);
-    nes.reset();
 
     var buffer = sdl2.SDL_CreateTexture(ren, sdl2.SDL_PIXELFORMAT_RGB24, sdl2.SDL_TEXTUREACCESS_STREAMING, 256, 240);
 
@@ -170,18 +169,13 @@ pub fn main() !u8 {
 
         if (!paused) {
             nes.run_frame();
+        }
 
-            // std.debug.print("Samples: [", .{});
-            // for (0..nes.apu.buffer.len) |i| {
-            //     std.debug.print("{d: >3} ", .{nes.apu.buffer.buffer[i]});
-            // }
-            // std.debug.print("]\n", .{});
-            sdl_check(sdl2.SDL_QueueAudio(audio_device, &nes.apu.buffer.buffer, @intCast(u32, nes.apu.buffer.len * 2)));
-            const queued = sdl2.SDL_GetQueuedAudioSize(audio_device);
-            nes.apu.flush();
-            if (queued > 44100 / 15 * 2) {
-                sdl2.SDL_PauseAudioDevice(audio_device, 0);
-            }
+        sdl_check(sdl2.SDL_QueueAudio(audio_device, &nes.apu.buffer.buffer, @intCast(u32, nes.apu.buffer.len * 2)));
+        const queued = sdl2.SDL_GetQueuedAudioSize(audio_device);
+        nes.apu.flush();
+        if (queued > 44100 / 15 * 2) {
+            sdl2.SDL_PauseAudioDevice(audio_device, 0);
         }
 
         sdl_check(sdl2.SDL_SetRenderDrawColor(ren, 0, 0, 0, 255));
