@@ -247,7 +247,7 @@ pub const Ppu = struct {
                 const y_off = y + self.scroll_y;
                 const x_off = x + self.scroll_x;
 
-                if (x_off % 8 == 0) { // Fetch tile
+                if (x_off % 8 == 0 or line_cycle == 1) { // Fetch tile
                     var tile_y = @intCast(u16, y_off / 8);
                     var tile_x = @intCast(u16, x_off / 8);
                     var nt_sel: u2 = @intCast(u2, self.ctrl & 3);

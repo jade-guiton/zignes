@@ -18,7 +18,9 @@ pub const Cart = struct {
         const Impl = struct {
             pub fn deinit(self_opaque: *anyopaque, alloc: Allocator) void {
                 const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
-                self.deinit(alloc);
+                if (@hasDecl(ptr_info.Pointer.child, "deinit")) {
+                    self.deinit(alloc);
+                }
                 alloc.destroy(self);
             }
             pub fn read_opt(self_opaque: *anyopaque, add: u16) ?u8 {
@@ -76,16 +78,16 @@ pub const NtMirroring = enum {
 };
 
 pub const Nrom = struct {
-    prg_rom0: *[16 * 1024]u8,
+    prg_rom0: ?*[16 * 1024]u8,
     prg_rom1: ?*[16 * 1024]u8,
     prg_ram: ?*[8 * 1024]u8,
-    chr0: *[4 * 1024]u8,
-    chr1: *[4 * 1024]u8,
+    chr0: ?*[4 * 1024]u8,
+    chr1: ?*[4 * 1024]u8,
     is_chr_ram: bool,
     nt_mirroring: NtMirroring,
     vram: [2048]u8,
 
-    pub fn init(self: *Nrom, prg_rom0: *[16 * 1024]u8, prg_rom1: ?*[16 * 1024]u8, prg_ram: ?*[8 * 1024]u8, chr0: *[4 * 1024]u8, chr1: *[4 * 1024]u8, is_chr_ram: bool, nt_mirroring: NtMirroring) void {
+    pub fn init(self: *Nrom, prg_rom0: ?*[16 * 1024]u8, prg_rom1: ?*[16 * 1024]u8, prg_ram: ?*[8 * 1024]u8, chr0: ?*[4 * 1024]u8, chr1: ?*[4 * 1024]u8, is_chr_ram: bool, nt_mirroring: NtMirroring) void {
         self.prg_rom0 = prg_rom0;
         self.prg_rom1 = prg_rom1;
         self.prg_ram = prg_ram;
@@ -96,13 +98,16 @@ pub const Nrom = struct {
         self.vram = [_]u8{0} ** 2048;
     }
     pub fn deinit(self: *Nrom, alloc: Allocator) void {
-        alloc.free(self.prg_rom0);
+        if (self.prg_rom0) |prg_rom0|
+            alloc.free(prg_rom0);
         if (self.prg_rom1) |prg_rom1|
             alloc.free(prg_rom1);
         if (self.prg_ram) |prg_ram|
             alloc.free(prg_ram);
-        alloc.free(self.chr0);
-        alloc.free(self.chr1);
+        if (self.chr0) |chr0|
+            alloc.free(chr0);
+        if (self.chr1) |chr1|
+            alloc.free(chr1);
     }
 
     pub fn read_opt(self: *Nrom, add: u16) ?u8 {
@@ -115,12 +120,12 @@ pub const Nrom = struct {
                 return null;
             }
         } else if (add < 0xc000) {
-            return self.prg_rom0[add - 0x8000];
+            return self.prg_rom0.?[add - 0x8000];
         } else {
             if (self.prg_rom1) |prg_rom1| {
                 return prg_rom1[add - 0xc000];
             } else {
-                return self.prg_rom0[add - 0xc000];
+                return self.prg_rom0.?[add - 0xc000];
             }
         }
     }
@@ -150,9 +155,9 @@ pub const Nrom = struct {
 
     pub fn ppu_read(self: *Nrom, add: u16) u8 {
         if (add < 0x1000) { // Left pattern table
-            return self.chr0[add];
+            return self.chr0.?[add];
         } else if (add < 0x2000) { // Right pattern table
-            return self.chr1[add - 0x1000];
+            return self.chr1.?[add - 0x1000];
         } else if (add < 0x4000) { // Nametables
             return self.vram[self.nt_mirror(add)];
         } else {
@@ -161,9 +166,9 @@ pub const Nrom = struct {
     }
     pub fn ppu_write(self: *Nrom, add: u16, val: u8) void {
         if (add < 0x1000) { // Left pattern table
-            if (self.is_chr_ram) self.chr0[add] = val;
+            if (self.is_chr_ram) self.chr0.?[add] = val;
         } else if (add < 0x2000) { // Right pattern table
-            if (self.is_chr_ram) self.chr1[add - 0x1000] = val;
+            if (self.is_chr_ram) self.chr1.?[add - 0x1000] = val;
         } else if (add < 0x3f00) { // Nametables
             self.vram[self.nt_mirror(add)] = val;
         }
@@ -200,11 +205,6 @@ pub const Mmc1 = struct {
         self.chr0_sel = 0;
         self.chr1_sel = 0;
         self.prg_sel = 0;
-    }
-    pub fn deinit(self: *Mmc1, alloc: Allocator) void {
-        _ = alloc;
-        _ = self;
-        // Nrom only contains pointers to current struct, should not deinit
     }
 
     fn update_mapping(self: *Mmc1) void {
@@ -286,6 +286,40 @@ pub const Mmc1 = struct {
     }
 
     pub fn cart(self: *Mmc1) Cart {
+        return Cart.init(self);
+    }
+};
+
+pub const UxRom = struct {
+    nrom: Nrom,
+    prg_rom_banks: std.BoundedArray([16 * 1024]u8, 16),
+    chr0: [4 * 1024]u8,
+    chr1: [4 * 1024]u8,
+
+    pub fn init(self: *UxRom, prg_rom_banks: std.BoundedArray([16 * 1024]u8, 16), chr0: [4 * 1024]u8, chr1: [4 * 1024]u8, is_chr_ram: bool, nt_mirroring: NtMirroring) void {
+        self.prg_rom_banks = prg_rom_banks;
+        self.chr0 = chr0;
+        self.chr1 = chr1;
+        self.nrom.init(&self.prg_rom_banks.buffer[0], &self.prg_rom_banks.buffer[self.prg_rom_banks.len - 1], null, &self.chr0, &self.chr1, is_chr_ram, nt_mirroring);
+    }
+
+    pub fn read_opt(self: *UxRom, add: u16) ?u8 {
+        return self.nrom.read_opt(add);
+    }
+    pub fn write(self: *UxRom, add: u16, val: u8) void {
+        if (add < 0x8000) {
+            self.nrom.write(add, val);
+        } else { // Bank select
+            self.nrom.prg_rom0 = &self.prg_rom_banks.buffer[val & 0x0f];
+        }
+    }
+    pub fn ppu_read(self: *UxRom, add: u16) u8 {
+        return self.nrom.ppu_read(add);
+    }
+    pub fn ppu_write(self: *UxRom, add: u16, val: u8) void {
+        self.nrom.ppu_write(add, val);
+    }
+    pub fn cart(self: *UxRom) Cart {
         return Cart.init(self);
     }
 };

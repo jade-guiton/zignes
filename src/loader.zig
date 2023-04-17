@@ -122,6 +122,30 @@ fn load_cart(alloc: Allocator, in_stream: anytype) !mappers.Cart {
             mapper.init(prg_rom_banks, prg_ram_banks, chr_banks, is_chr_ram, nt_mirroring);
             return mapper.cart();
         },
+        2 => { // UxROM
+            if (prg_rom_size > 16 or chr_rom_size > 1 or nt_mirroring == NtMirroring.Four)
+                return CartLoadError.UnsupportedRom;
+
+            var prg_rom_banks: std.BoundedArray([16 * 1024]u8, 16) = undefined;
+            prg_rom_banks.len = prg_rom_size;
+            for (0..prg_rom_size) |i| {
+                prg_rom_banks.set(i, try read_static(in_stream, 16 * 1024));
+            }
+
+            var chr0: [4 * 1024]u8 = undefined;
+            var chr1: [4 * 1024]u8 = undefined;
+            var is_chr_ram: bool = false;
+            if (chr_rom_size == 0) {
+                is_chr_ram = true;
+            } else {
+                chr0 = try read_static(in_stream, 4 * 1024);
+                chr1 = try read_static(in_stream, 4 * 1024);
+            }
+
+            var mapper = try alloc.create(mappers.UxRom);
+            mapper.init(prg_rom_banks, chr0, chr1, is_chr_ram, nt_mirroring);
+            return mapper.cart();
+        },
         else => return CartLoadError.UnsupportedRom,
     }
 }

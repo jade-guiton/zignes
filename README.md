@@ -1,8 +1,8 @@
 **An NES emulator using SDL2 written in Zig.**
 
-Made mostly for fun. Not very accurate, and only supports mappers 0 and 1 for now.
+Made mostly for fun. Not very accurate, and only supports mappers 0, 1, and 2 for now.
 
-CPU and PPU emulation are decent enough to run Super Mario Bros or The Legend of Zelda without issue. APU emulation is still very incomplete.
+CPU and PPU emulation are decent enough to run Super Mario Bros or The Legend of Zelda without issue. APU emulation is still rather incomplete, and does not support DCM samples.
 
 Many thanks to the contributors of the NESDev Wiki.
 

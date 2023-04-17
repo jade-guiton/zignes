@@ -34,7 +34,8 @@ pub const Nes = struct {
     cart: Cart,
     ppu: Ppu,
     apu: Apu,
-    controller: Controller,
+    port0: ?Controller,
+    port1: ?Controller,
     ram: [2048]u8,
     reg: struct {
         pc: u16, // program counter
@@ -59,12 +60,13 @@ pub const Nes = struct {
     master_cycle: u64,
     trace: bool,
 
-    pub fn init(cart: Cart) Nes {
+    pub fn init(cart: Cart, port0: ?Controller, port1: ?Controller) Nes {
         var nes = Nes{
             .cart = cart,
             .ppu = Ppu.init(cart),
             .apu = Apu.init(),
-            .controller = Controller.init(),
+            .port0 = port0,
+            .port1 = port1,
             .ram = [_]u8{0} ** 2048,
             .reg = .{
                 .pc = 0x0000,
@@ -123,9 +125,17 @@ pub const Nes = struct {
             if (add == 0x4015) { // APU status
                 return self.apu.read(add);
             } else if (add == 0x4016) { // Controller 1
-                return self.controller.read(0);
+                if (self.port0) |*ctrl| {
+                    return ctrl.read();
+                } else {
+                    return 0;
+                }
             } else if (add == 0x4017) { // Controller 2
-                return self.controller.read(1);
+                if (self.port1) |*ctrl| {
+                    return ctrl.read();
+                } else {
+                    return 0;
+                }
             }
             return null;
         } else {
@@ -171,7 +181,8 @@ pub const Nes = struct {
                 self.cpu_cycle += 1;
             }
         } else if (add == 0x4016) { // Controller
-            return self.controller.write(val);
+            if (self.port0) |*ctrl| ctrl.write(val);
+            if (self.port1) |*ctrl| ctrl.write(val);
         } else {
             return self.cart.write(add, val);
         }

@@ -4,6 +4,8 @@ fn bool_byte(b: bool) u8 {
     return if (b) 1 else 0;
 }
 
+pub const Button = enum { Up, Left, Down, Right, A, B, Start, Select };
+
 pub const Controller = struct {
     buttons: struct {
         a: bool,
@@ -17,7 +19,7 @@ pub const Controller = struct {
     },
 
     latch: u8,
-    shift: [2]u8,
+    shift: u8,
 
     pub fn init() Controller {
         return Controller{
@@ -32,34 +34,27 @@ pub const Controller = struct {
                 .right = false,
             },
             .latch = 0,
-            .shift = .{ 0xff, 0 },
+            .shift = 0xff,
         };
     }
 
-    pub fn set_key(self: *Controller, scancode: sdl2.SDL_Scancode, state: bool) void {
-        if (scancode == sdl2.SDL_SCANCODE_W) {
-            self.buttons.up = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_A) {
-            self.buttons.left = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_S) {
-            self.buttons.down = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_D) {
-            self.buttons.right = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_L) {
-            self.buttons.a = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_K) {
-            self.buttons.b = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_J) {
-            self.buttons.start = state;
-        } else if (scancode == sdl2.SDL_SCANCODE_H) {
-            self.buttons.select = state;
+    pub fn set_button(self: *Controller, button: Button, state: bool) void {
+        switch (button) {
+            .Up => self.buttons.up = state,
+            .Left => self.buttons.left = state,
+            .Down => self.buttons.down = state,
+            .Right => self.buttons.right = state,
+            .A => self.buttons.a = state,
+            .B => self.buttons.b = state,
+            .Start => self.buttons.start = state,
+            .Select => self.buttons.select = state,
         }
+        self.update();
     }
 
     fn update(self: *Controller) void {
         if (self.latch & 1 == 1) {
-            self.shift[0] = bool_byte(self.buttons.a) | (bool_byte(self.buttons.b) << 1) | (bool_byte(self.buttons.select) << 2) | (bool_byte(self.buttons.start) << 3) | (bool_byte(self.buttons.up) << 4) | (bool_byte(self.buttons.down) << 5) | (bool_byte(self.buttons.left) << 6) | (bool_byte(self.buttons.right) << 7);
-            self.shift[1] = 0; // For now...
+            self.shift = bool_byte(self.buttons.a) | (bool_byte(self.buttons.b) << 1) | (bool_byte(self.buttons.select) << 2) | (bool_byte(self.buttons.start) << 3) | (bool_byte(self.buttons.up) << 4) | (bool_byte(self.buttons.down) << 5) | (bool_byte(self.buttons.left) << 6) | (bool_byte(self.buttons.right) << 7);
         }
     }
 
@@ -68,12 +63,11 @@ pub const Controller = struct {
         self.latch = val;
     }
 
-    pub fn read(self: *Controller, port: u1) u8 {
+    pub fn read(self: *Controller) u8 {
         self.update();
-        const bit = self.shift[port] & 1;
-        self.shift[port] >>= 1;
-        const connected = port == 0;
-        if (connected) self.shift[port] |= 0x80;
+        const bit = self.shift & 1;
+        self.shift >>= 1;
+        self.shift |= 0x80;
         return bit;
     }
 };
