@@ -489,7 +489,7 @@ pub const Apu = struct {
 
         const output = (pulse_out + tnd_out) * 0.25;
         const new_sample = self.filter1.apply(output);
-        self.buffer.append(@floatToInt(i16, @trunc(new_sample * 32_767))) catch unreachable;
+        self.buffer.append(@floatToInt(i16, @trunc(new_sample * 32_767))) catch {};
         self.samples += 1;
     }
 

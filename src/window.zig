@@ -9,7 +9,9 @@ fn sdl_check(err: c_int) void {
     if (err != 0) sdl_error();
 }
 
-pub fn Window(comptime width: i32, comptime height: i32) type {
+const top_margin = 36;
+
+pub fn Window(comptime width: i32, comptime height: i32, comptime scale: i32) type {
     return struct {
         const Self = @This();
 
@@ -20,10 +22,10 @@ pub fn Window(comptime width: i32, comptime height: i32) type {
         draw_buffer: bool,
         audio_device: sdl2.SDL_AudioDeviceID,
 
-        pub fn init(title: [*c]const u8, scale: i32) Self {
+        pub fn init(title: [*c]const u8) Self {
             sdl_check(sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO | sdl2.SDL_INIT_AUDIO));
             _ = sdl2.SDL_SetHint(sdl2.SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
-            var win: *sdl2.SDL_Window = sdl2.SDL_CreateWindow(title, sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED, width * scale, height * scale, sdl2.SDL_WINDOW_SHOWN) orelse sdl_error();
+            var win: *sdl2.SDL_Window = sdl2.SDL_CreateWindow(title, sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED, width * scale, height * scale + top_margin, sdl2.SDL_WINDOW_SHOWN) orelse sdl_error();
             var ren: *sdl2.SDL_Renderer = sdl2.SDL_CreateRenderer(win, -1, sdl2.SDL_RENDERER_ACCELERATED | sdl2.SDL_RENDERER_PRESENTVSYNC) orelse sdl_error();
             var debug = DebugPrinter.init(ren);
             var buffer = sdl2.SDL_CreateTexture(ren, sdl2.SDL_PIXELFORMAT_RGB24, sdl2.SDL_TEXTUREACCESS_STREAMING, width, height);
@@ -67,7 +69,13 @@ pub fn Window(comptime width: i32, comptime height: i32) type {
             sdl_check(sdl2.SDL_RenderClear(self.ren));
 
             if (self.draw_buffer) {
-                sdl_check(sdl2.SDL_RenderCopy(self.ren, self.buffer, null, null));
+                const dest = sdl2.SDL_Rect{
+                    .x = 0,
+                    .y = top_margin,
+                    .w = width * scale,
+                    .h = height * scale,
+                };
+                sdl_check(sdl2.SDL_RenderCopy(self.ren, self.buffer, null, &dest));
             }
         }
 

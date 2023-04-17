@@ -47,7 +47,6 @@ test "Pass NESTest (automatic, official only)" {
     var cart = try loader.load_cart_memory(alloc, @embedFile("nestest.nes"));
     defer cart.deinit(alloc);
     var nes = Nes.init(cart, null, null);
-    nes.reset();
     nes.reg.pc = 0xc000;
 
     for (logs.items) |log| {

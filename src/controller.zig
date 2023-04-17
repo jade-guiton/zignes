@@ -6,17 +6,56 @@ fn bool_byte(b: bool) u8 {
 
 pub const Button = enum { Up, Left, Down, Right, A, B, Start, Select };
 
+pub const ButtonStates = struct {
+    a: bool,
+    b: bool,
+    select: bool,
+    start: bool,
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+
+    pub fn init() ButtonStates {
+        return ButtonStates{
+            .a = false,
+            .b = false,
+            .select = false,
+            .start = false,
+            .up = false,
+            .down = false,
+            .left = false,
+            .right = false,
+        };
+    }
+
+    pub fn set_button(self: *ButtonStates, button: Button, state: bool) void {
+        switch (button) {
+            .Up => self.up = state,
+            .Left => self.left = state,
+            .Down => self.down = state,
+            .Right => self.right = state,
+            .A => self.a = state,
+            .B => self.b = state,
+            .Start => self.start = state,
+            .Select => self.select = state,
+        }
+    }
+
+    pub fn repr(self: *ButtonStates, writer: anytype) !void {
+        try writer.writeByte(if (self.left) 'L' else '.');
+        try writer.writeByte(if (self.right) 'R' else '.');
+        try writer.writeByte(if (self.up) 'U' else '.');
+        try writer.writeByte(if (self.down) 'D' else '.');
+        try writer.writeByte(if (self.a) 'A' else '.');
+        try writer.writeByte(if (self.b) 'B' else '.');
+        try writer.writeByte(if (self.start) 'S' else '.');
+        try writer.writeByte(if (self.select) 's' else '.');
+    }
+};
+
 pub const Controller = struct {
-    buttons: struct {
-        a: bool,
-        b: bool,
-        select: bool,
-        start: bool,
-        up: bool,
-        down: bool,
-        left: bool,
-        right: bool,
-    },
+    buttons: ButtonStates,
 
     latch: u8,
     shift: u8,
@@ -39,16 +78,7 @@ pub const Controller = struct {
     }
 
     pub fn set_button(self: *Controller, button: Button, state: bool) void {
-        switch (button) {
-            .Up => self.buttons.up = state,
-            .Left => self.buttons.left = state,
-            .Down => self.buttons.down = state,
-            .Right => self.buttons.right = state,
-            .A => self.buttons.a = state,
-            .B => self.buttons.b = state,
-            .Start => self.buttons.start = state,
-            .Select => self.buttons.select = state,
-        }
+        self.buttons.set_button(button, state);
         self.update();
     }
 

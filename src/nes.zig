@@ -4,6 +4,8 @@ const Cart = @import("./mapper.zig").Cart;
 const Ppu = @import("./ppu.zig").Ppu;
 const Apu = @import("./apu.zig").Apu;
 const Controller = @import("./controller.zig").Controller;
+
+const movies = @import("./movie.zig");
 const instructions = @import("./disasm.zig").instructions;
 const disasm = @import("./disasm.zig").disasm;
 
@@ -59,6 +61,7 @@ pub const Nes = struct {
     found_nyi: bool,
     master_cycle: u64,
     trace: bool,
+    frame_no: u64,
 
     pub fn init(cart: Cart, port0: ?Controller, port1: ?Controller) Nes {
         var nes = Nes{
@@ -90,6 +93,7 @@ pub const Nes = struct {
             .found_nyi = false,
             .master_cycle = 0,
             .trace = false,
+            .frame_no = 0,
         };
 
         nes.reg.pc = nes.read16_cycle(0xfffc);
@@ -590,35 +594,46 @@ pub const Nes = struct {
         }
     }
 
-    pub fn run_cycle(nes: *Nes) void {
-        nes.master_cycle += 1;
-        if (nes.cpu_cycle * 12 < nes.master_cycle) {
-            nes.run_cpu_step();
+    fn run_cycle(self: *Nes) void {
+        self.master_cycle += 1;
+        if (self.cpu_cycle * 12 < self.master_cycle) {
+            self.run_cpu_step();
         }
-        if (nes.ppu.cycle * 4 < nes.master_cycle) {
-            nes.ppu.run_step();
+        if (self.ppu.cycle * 4 < self.master_cycle) {
+            self.ppu.run_step();
         }
-        if (nes.apu.cycle * 12 < nes.master_cycle) {
-            nes.apu.run_step();
+        if (self.apu.cycle * 12 < self.master_cycle) {
+            self.apu.run_step();
         }
-        if (nes.apu.samples * 486 < nes.master_cycle) {
-            nes.apu.sample();
-        }
-    }
-
-    pub fn run_instr(nes: *Nes) void {
-        const start_cycle = nes.cpu_cycle;
-        while (nes.cpu_cycle == start_cycle and !nes.found_nyi) {
-            nes.run_cycle();
+        if (self.apu.samples * 486 < self.master_cycle) {
+            self.apu.sample();
         }
     }
 
-    pub fn run_frame(nes: *Nes) void {
-        while (!nes.ppu.in_vblank and !nes.found_nyi) {
-            nes.run_cycle();
+    pub fn run_instr(self: *Nes) void {
+        const start_cycle = self.cpu_cycle;
+        while (self.cpu_cycle == start_cycle and !self.found_nyi) {
+            self.run_cycle();
         }
-        while (nes.ppu.in_vblank and !nes.found_nyi) {
-            nes.run_cycle();
+    }
+
+    pub fn run_frame(self: *Nes, movie: ?movies.Movie) void {
+        if (movie) |movie_data| {
+            if (self.frame_no < movie_data.frames.items.len) {
+                self.port0.?.buttons = movie_data.frames.items[self.frame_no].port0;
+                std.debug.print("F{d:0>5} ", .{self.frame_no});
+                self.port0.?.buttons.repr(std.io.getStdErr().writer()) catch unreachable;
+                std.debug.print("\n", .{});
+            }
         }
+
+        self.apu.flush();
+        while (self.ppu.in_vblank and !self.found_nyi) {
+            self.run_cycle();
+        }
+        while (!self.ppu.in_vblank and !self.found_nyi) {
+            self.run_cycle();
+        }
+        self.frame_no += 1;
     }
 };
