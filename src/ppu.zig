@@ -3,6 +3,30 @@ const Cart = @import("./mapper.zig").Cart;
 
 const render_palette = @ptrCast(*const [64][3]u8, @embedFile("palette.pal"));
 
+fn copy_bits(comptime nb_bits: comptime_int, comptime src_off: comptime_int, comptime dst_off: comptime_int, dst_ptr: anytype, src: anytype) void {
+    const Src = @TypeOf(src);
+    const src_info = @typeInfo(Src);
+    if (src_info != .Int) @compileError("src must be an integer");
+    if (src_info.Int.signedness != .unsigned) @compileError("src must be an unsigned integer");
+    const src_bits = src_info.Int.bits;
+    _ = src_bits;
+
+    const DstPtr = @TypeOf(dst_ptr);
+    const dst_ptr_info = @typeInfo(DstPtr);
+    if (dst_ptr_info != .Pointer) @compileError("dst_ptr must be a pointer");
+    if (dst_ptr_info.Pointer.size != .One) @compileError("dst_ptr must be a single item pointer");
+    const Dst = dst_ptr_info.Pointer.child;
+    const dst_info = @typeInfo(Dst);
+    if (dst_info != .Int) @compileError("dst must be an integer");
+    if (dst_info.Int.signedness != .unsigned) @compileError("dst must be an unsigned integer");
+    const dst_bits = dst_info.Int.bits;
+    _ = dst_bits;
+
+    const bit_mask = (1 << nb_bits) - 1;
+    const dst_mask = ~@as(Dst, bit_mask << dst_off);
+    dst_ptr.* = (dst_ptr.* & dst_mask) | (@intCast(Dst, (src >> src_off) & bit_mask) << dst_off);
+}
+
 const LineSprite = struct {
     pat: [8]u2,
     pal: u2,
@@ -24,16 +48,21 @@ pub const Ppu = struct {
     line_pt_hi: u8,
     buffer: [240][256][3]u8,
 
-    ctrl: u8,
+    ctrl: struct {
+        add_inc: u1,
+        spr_pat_table: u1,
+        bg_pat_table: u1,
+        spr_size: u1,
+        vbl_nmi: bool,
+    },
     pending_vblank_clear: bool,
     mask: u8,
     status: u8,
     oam_addr: u8,
-    ppu_addr: u16,
-    ppu_addr_hi: u8,
     ppu_data_buf: u8,
-    scroll_x: u8,
-    scroll_y: u8,
+    cur_ppu_addr: u15,
+    temp_ppu_addr: u15,
+    fine_x_scroll: u3,
     ppu_latch: bool,
 
     cycle: u64,
@@ -50,23 +79,28 @@ pub const Ppu = struct {
             .line_pt_lo = 0,
             .line_pt_hi = 0,
             .buffer = [_][256][3]u8{[_][3]u8{[3]u8{ 0, 0, 0 }} ** 256} ** 240,
-            .ctrl = 0,
+            .ctrl = .{
+                .add_inc = 0,
+                .spr_pat_table = 0,
+                .bg_pat_table = 0,
+                .spr_size = 0,
+                .vbl_nmi = false,
+            },
             .pending_vblank_clear = false,
             .mask = 0,
             .status = 0,
             .oam_addr = 0,
-            .ppu_addr = 0,
-            .ppu_addr_hi = 0,
             .ppu_data_buf = 0,
-            .scroll_x = 0,
-            .scroll_y = 0,
+            .cur_ppu_addr = 0,
+            .temp_ppu_addr = 0,
+            .fine_x_scroll = 0,
             .ppu_latch = false,
             .cycle = 0,
             .in_vblank = false,
         };
     }
     pub fn nmi(self: *Ppu) bool {
-        return (self.status >> 7 == 1) and (self.ctrl >> 7 == 1);
+        return (self.status >> 7 == 1) and self.ctrl.vbl_nmi;
     }
 
     pub fn cpu_read(self: *Ppu, add: u16) u8 {
@@ -81,16 +115,17 @@ pub const Ppu = struct {
             0x2004 => return self.oam[self.oam_addr], // OAMDATA
             0x2007 => { // PPUDATA
                 var val: u8 = undefined;
+                const ppu_addr = @intCast(u14, self.cur_ppu_addr & 0x3fff);
                 if (add < 0x3f00) { // Go through buffer
                     val = self.ppu_data_buf;
-                    self.ppu_data_buf = self.read(self.ppu_addr);
+                    self.ppu_data_buf = self.read(ppu_addr);
                 } else { // Palette data
-                    val = self.read(self.ppu_addr);
-                    self.ppu_data_buf = self.cart.ppu_read(self.ppu_addr);
+                    val = self.read(ppu_addr);
+                    self.ppu_data_buf = self.cart.ppu_read(ppu_addr);
                 }
 
-                const inc = if ((self.ctrl >> 2) & 1 == 1) @as(u16, 32) else @as(u16, 1);
-                self.ppu_addr = (self.ppu_addr +% inc) & 0x3fff;
+                const inc = if (self.ctrl.add_inc == 1) @as(u15, 32) else @as(u15, 1);
+                self.cur_ppu_addr +%= inc;
                 return val;
             },
             else => return 0,
@@ -99,7 +134,14 @@ pub const Ppu = struct {
     pub fn cpu_write(self: *Ppu, add: u16, val: u8) void {
         switch (add) {
             0x2000 => { // PPUCTRL
-                self.ctrl = val;
+                self.ctrl = .{
+                    .add_inc = @intCast(u1, (val >> 2) & 1),
+                    .spr_pat_table = @intCast(u1, (val >> 3) & 1),
+                    .bg_pat_table = @intCast(u1, (val >> 4) & 1),
+                    .spr_size = @intCast(u1, (val >> 5) & 1),
+                    .vbl_nmi = (val >> 7) & 1 == 1,
+                };
+                copy_bits(2, 0, 10, &self.temp_ppu_addr, val);
             },
             0x2001 => { // PPUMASK
                 self.mask = val;
@@ -113,36 +155,35 @@ pub const Ppu = struct {
             },
             0x2005 => { // PPUSCROLL
                 if (self.ppu_latch) {
-                    self.scroll_y = val;
+                    copy_bits(5, 3, 5, &self.temp_ppu_addr, val);
+                    copy_bits(3, 0, 12, &self.temp_ppu_addr, val);
                 } else {
-                    self.scroll_x = val;
+                    copy_bits(5, 3, 0, &self.temp_ppu_addr, val);
+                    self.fine_x_scroll = @intCast(u3, val & 7);
                 }
                 self.ppu_latch = !self.ppu_latch;
             },
             0x2006 => { // PPUADDR
                 if (self.ppu_latch) {
-                    self.ppu_addr = ((@intCast(u16, self.ppu_addr_hi) << 8) | val) & 0x3fff;
-                    // WTF 1:
-                    self.scroll_x = (self.scroll_x & 0xe0) | (val & 0x1f);
-                    self.scroll_y = (self.scroll_y & 0xc7) | (((val >> 5) & 7) << 3);
+                    self.temp_ppu_addr &= 0x7f00;
+                    self.temp_ppu_addr |= val;
+                    self.cur_ppu_addr = self.temp_ppu_addr;
                 } else {
-                    self.ppu_addr_hi = val;
-                    // WTF 2:
-                    self.scroll_y = (self.scroll_y & 0x3c) | ((val & 3) << 6) | ((val >> 6) & 3);
-                    self.ctrl = (self.ctrl & 0xfc) | ((val >> 2) & 3);
+                    self.temp_ppu_addr &= 0x00ff;
+                    self.temp_ppu_addr |= @intCast(u15, val & 0x3f) << 8;
                 }
                 self.ppu_latch = !self.ppu_latch;
             },
             0x2007 => { // PPUDATA
-                self.write(self.ppu_addr, val);
-                const inc = if ((self.ctrl >> 2) & 1 == 1) @as(u16, 32) else @as(u16, 1);
-                self.ppu_addr = (self.ppu_addr + inc) & 0x3fff;
+                self.write(@intCast(u14, self.cur_ppu_addr & 0x3fff), val);
+                const inc = if (self.ctrl.add_inc == 1) @as(u15, 32) else @as(u15, 1);
+                self.cur_ppu_addr +%= inc;
             },
             else => {},
         }
     }
 
-    fn read(self: *Ppu, add: u16) u8 {
+    fn read(self: *Ppu, add: u14) u8 {
         if (add >= 0x4000) unreachable;
         if (add < 0x3f00) { // Pattern tables + Nametables
             return self.cart.ppu_read(add);
@@ -152,7 +193,7 @@ pub const Ppu = struct {
             return self.pal[pal_idx];
         }
     }
-    fn write(self: *Ppu, add: u16, val: u8) void {
+    fn write(self: *Ppu, add: u14, val: u8) void {
         if (add >= 0x4000) unreachable;
         if (add < 0x3f00) { // Pattern tables + Nametables
             return self.cart.ppu_write(add, val);
@@ -172,6 +213,9 @@ pub const Ppu = struct {
         const line_cycle = self.cycle % 341;
         const line = @intCast(i32, line_no % 262) - 1;
 
+        const bg_en = (self.mask >> 3) & 1 == 1;
+        const spr_en = (self.mask >> 4) & 1 == 1;
+
         // Note: All the timings are wrong. Good enough for now.
 
         if (line == -1) { // Pre-render scanline
@@ -182,15 +226,32 @@ pub const Ppu = struct {
                 self.status &= 0x3f; // Clear VBlank flag and Sprite 0 hit
                 self.cycle += 256;
             } else if (line_cycle == 257) {
+                if (bg_en) {
+                    // Copy horizontal position bits
+                    copy_bits(5, 0, 0, &self.cur_ppu_addr, self.temp_ppu_addr);
+                    copy_bits(1, 10, 10, &self.cur_ppu_addr, self.temp_ppu_addr);
+                }
+
                 self.oam_addr = 0;
-                self.cycle += 84;
+                self.cycle += 23;
+            } else if (280 <= line_cycle and line_cycle <= 304) {
+                if (bg_en) {
+                    // Copy vertical bits
+                    copy_bits(5, 5, 5, &self.cur_ppu_addr, self.temp_ppu_addr);
+                    copy_bits(4, 11, 11, &self.cur_ppu_addr, self.temp_ppu_addr);
+                }
+
+                self.cycle += 1;
+                if (line_cycle == 304) {
+                    self.cycle += 36;
+                }
             } else {
                 unreachable;
             }
         } else if (line < 240) { // Visible scanlines
             if (line_cycle == 0) {
                 // Sprite evaluation + tile data fetch
-                const tall_sprites = (self.ctrl >> 5) & 1 == 1;
+                const tall_sprites = self.ctrl.spr_size == 1;
                 const sprite_h: u8 = if (tall_sprites) 16 else 8;
                 self.line_sprite_cnt = 0;
                 for (0..64) |spr_i| {
@@ -199,15 +260,15 @@ pub const Ppu = struct {
                     y += 1;
                     if (y > line or y + sprite_h <= line) continue;
                     var bottom = tall_sprites and line - y >= 8;
-                    var row = @intCast(u16, (line - y) & 7);
+                    var row = @intCast(u14, (line - y) & 7);
 
-                    var tile_bank: u16 = undefined;
-                    var tile = @intCast(u16, self.oam[spr_i * 4 + 1]);
+                    var tile_bank: u14 = undefined;
+                    var tile = @intCast(u14, self.oam[spr_i * 4 + 1]);
                     if (tall_sprites) {
                         tile_bank = tile & 1;
                         tile &= 0xfe;
                     } else {
-                        tile_bank = (self.ctrl >> 3) & 1;
+                        tile_bank = self.ctrl.spr_pat_table;
                     }
 
                     var sprite: LineSprite = undefined;
@@ -244,30 +305,28 @@ pub const Ppu = struct {
                 const y = @intCast(u64, line);
                 const x = line_cycle - 1;
 
-                const y_off = y + self.scroll_y;
-                const x_off = x + self.scroll_x;
-
-                if (x_off % 8 == 0 or line_cycle == 1) { // Fetch tile
-                    var tile_y = @intCast(u16, y_off / 8);
-                    var tile_x = @intCast(u16, x_off / 8);
-                    var nt_sel: u2 = @intCast(u2, self.ctrl & 3);
-                    const pix_y = @intCast(u16, y_off % 8);
-
-                    if (tile_x >= 32) nt_sel ^= 1;
-                    if (tile_y >= 30) nt_sel ^= 2;
-                    tile_x &= 31;
-                    tile_y %= 30;
-
-                    const nt_add = 0x2000 + @intCast(u16, nt_sel) * 0x0400;
-                    const nt_byte = @intCast(u16, self.read(nt_add + tile_y * 32 + tile_x));
-
-                    const at_byte = self.read(nt_add + 0x03c0 + tile_y / 4 * 8 + tile_x / 4);
+                if (bg_en and ((x + self.fine_x_scroll) % 8 == 0 or line_cycle == 1)) { // Fetch tile
+                    const nt_add = @intCast(u14, 0x2000 + (self.cur_ppu_addr & 0x0fff));
+                    const nt_byte = @intCast(u14, self.read(nt_add));
+                    const tile_x = self.cur_ppu_addr & 0x1f;
+                    const tile_y = (self.cur_ppu_addr >> 5) & 0x1f;
+                    const at_add = @intCast(u14, 0x23c0 + (self.cur_ppu_addr & 0x0c00) + tile_y / 4 * 8 + tile_x / 4);
+                    const at_byte = self.read(at_add);
                     const at_area = @intCast(u3, tile_y % 4 / 2 * 2 + tile_x % 4 / 2);
                     self.line_at_pal = @intCast(u2, (at_byte >> (at_area * 2)) & 3);
 
-                    const pt_add = @intCast(u16, (self.ctrl >> 4) & 1) * 0x1000;
+                    const pt_add = @intCast(u14, self.ctrl.bg_pat_table) * 0x1000;
+                    const pix_y = @intCast(u14, self.cur_ppu_addr >> 12);
                     self.line_pt_lo = self.read(pt_add + nt_byte * 16 + pix_y);
                     self.line_pt_hi = self.read(pt_add + nt_byte * 16 + 8 + pix_y);
+
+                    // coarse x increment
+                    if ((self.cur_ppu_addr & 0x001f) == 31) { // if coarse x == 31
+                        self.cur_ppu_addr &= ~@as(u15, 0x001f); // coarse x = 0
+                        self.cur_ppu_addr ^= 0x0400; // switch horizontal nametable
+                    } else {
+                        self.cur_ppu_addr +%= 1;
+                    }
                 }
 
                 const bg_col = self.read(0x3f00) & 0x3f; // Universal background color
@@ -277,7 +336,7 @@ pub const Ppu = struct {
                 var spr_prio: bool = undefined;
                 var is_spr0: bool = false;
                 var in_spr: bool = false;
-                if ((self.mask >> 4) & 1 == 1) { // Sprites
+                if (spr_en) { // Sprites
                     var i: u8 = self.line_sprite_cnt;
                     while (i > 0) {
                         i -= 1;
@@ -295,21 +354,21 @@ pub const Ppu = struct {
                 }
 
                 var bg_pix: u2 = 0;
-                if ((self.mask >> 3) & 1 == 1) { // Background
-                    const pix_x = @intCast(u3, x_off & 0x7);
+                if (bg_en) { // Background
+                    const pix_x = @intCast(u3, x & 0x7) +% self.fine_x_scroll;
                     const lo = (self.line_pt_lo >> (7 - pix_x)) & 1;
                     const hi = (self.line_pt_hi >> (7 - pix_x)) & 1;
                     bg_pix = @intCast(u2, (hi << 1) | lo);
                 }
 
-                const mask_bg = line_cycle > 8 or (self.mask >> 1) & 1 == 1;
-                const mask_spr = line_cycle > 8 or (self.mask >> 2) & 1 == 1;
+                const mask_bg = line_cycle > 8 or ((self.mask >> 1) & 1) == 1;
+                const mask_spr = line_cycle > 8 or ((self.mask >> 2) & 1) == 1;
 
                 var col: u8 = undefined;
                 if (bg_pix != 0 and (spr_pix == 0 or spr_prio) and mask_bg) {
-                    col = self.read(0x3f00 + @intCast(u16, 4 * @intCast(u16, self.line_at_pal) + @intCast(u16, bg_pix))) & 0x3f;
+                    col = self.read(0x3f00 + @intCast(u14, 4 * @intCast(u16, self.line_at_pal) + @intCast(u16, bg_pix))) & 0x3f;
                 } else if (spr_pix != 0 and mask_spr) {
-                    col = self.read(0x3f00 + @intCast(u16, 4 * (4 + @intCast(u16, spr_pal)) + @intCast(u16, spr_pix))) & 0x3f;
+                    col = self.read(0x3f00 + @intCast(u14, 4 * (4 + @intCast(u16, spr_pal)) + @intCast(u16, spr_pix))) & 0x3f;
                 } else {
                     col = bg_col;
                 }
@@ -320,8 +379,33 @@ pub const Ppu = struct {
                     self.status |= 0x40;
                 }
 
+                if (line_cycle == 256 and bg_en) { // Increment vertical position
+                    if ((self.cur_ppu_addr & 0x7000) != 0x7000) { // if fine Y < 7
+                        self.cur_ppu_addr +%= 0x1000; // increment fine Y
+                    } else {
+                        self.cur_ppu_addr &= ~@as(u15, 0x7000); // fine Y = 0
+                        var coarse_y = @intCast(u5, (self.cur_ppu_addr & 0x03e0) >> 5);
+                        if (coarse_y == 29) {
+                            coarse_y = 0;
+                            self.cur_ppu_addr ^= 0x0800; // switch vertical nametable
+                        } else if (coarse_y == 31) {
+                            coarse_y = 0;
+                        } else {
+                            coarse_y +%= 1;
+                        }
+                        // set new coarse y
+                        self.cur_ppu_addr &= ~@as(u15, 0x03e0);
+                        self.cur_ppu_addr |= @intCast(u15, coarse_y) << 5;
+                    }
+                }
+
                 self.cycle += 1;
             } else if (line_cycle <= 320) {
+                if (line_cycle == 257 and bg_en) { // Copy horizontal position bits
+                    copy_bits(5, 0, 0, &self.cur_ppu_addr, self.temp_ppu_addr);
+                    copy_bits(1, 10, 10, &self.cur_ppu_addr, self.temp_ppu_addr);
+                }
+
                 self.oam_addr = 0;
                 self.cycle += 8;
             } else if (line_cycle <= 336) {

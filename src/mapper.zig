@@ -6,8 +6,8 @@ pub const Cart = struct {
     deinit_fn: *const fn (*anyopaque, Allocator) void,
     read_opt_fn: *const fn (*anyopaque, u16) ?u8,
     write_fn: *const fn (*anyopaque, u16, u8) void,
-    ppu_read_fn: *const fn (*anyopaque, u16) u8,
-    ppu_write_fn: *const fn (*anyopaque, u16, u8) void,
+    ppu_read_fn: *const fn (*anyopaque, u14) u8,
+    ppu_write_fn: *const fn (*anyopaque, u14, u8) void,
 
     pub fn init(ptr: anytype) Cart {
         const Ptr = @TypeOf(ptr);
@@ -31,11 +31,11 @@ pub const Cart = struct {
                 const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
                 return ptr_info.Pointer.child.write(self, add, val);
             }
-            pub fn ppu_read(self_opaque: *anyopaque, add: u16) u8 {
+            pub fn ppu_read(self_opaque: *anyopaque, add: u14) u8 {
                 const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
                 return ptr_info.Pointer.child.ppu_read(self, add);
             }
-            pub fn ppu_write(self_opaque: *anyopaque, add: u16, val: u8) void {
+            pub fn ppu_write(self_opaque: *anyopaque, add: u14, val: u8) void {
                 const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
                 return ptr_info.Pointer.child.ppu_write(self, add, val);
             }
@@ -61,10 +61,10 @@ pub const Cart = struct {
         return self.write_fn(self.ptr, add, val);
     }
 
-    pub inline fn ppu_read(self: *Cart, add: u16) u8 {
+    pub inline fn ppu_read(self: *Cart, add: u14) u8 {
         return self.ppu_read_fn(self.ptr, add);
     }
-    pub inline fn ppu_write(self: *Cart, add: u16, val: u8) void {
+    pub inline fn ppu_write(self: *Cart, add: u14, val: u8) void {
         return self.ppu_write_fn(self.ptr, add, val);
     }
 };
@@ -137,7 +137,7 @@ pub const Nrom = struct {
         }
     }
 
-    fn nt_mirror(self: *Nrom, add: u16) u16 {
+    fn nt_mirror(self: *Nrom, add: u14) u14 {
         var add2 = add;
         add2 &= 0x0fff;
         switch (self.nt_mirroring) {
@@ -153,7 +153,7 @@ pub const Nrom = struct {
         return add2;
     }
 
-    pub fn ppu_read(self: *Nrom, add: u16) u8 {
+    pub fn ppu_read(self: *Nrom, add: u14) u8 {
         if (add < 0x1000) { // Left pattern table
             return self.chr0.?[add];
         } else if (add < 0x2000) { // Right pattern table
@@ -164,7 +164,7 @@ pub const Nrom = struct {
             unreachable;
         }
     }
-    pub fn ppu_write(self: *Nrom, add: u16, val: u8) void {
+    pub fn ppu_write(self: *Nrom, add: u14, val: u8) void {
         if (add < 0x1000) { // Left pattern table
             if (self.is_chr_ram) self.chr0.?[add] = val;
         } else if (add < 0x2000) { // Right pattern table
@@ -278,10 +278,10 @@ pub const Mmc1 = struct {
             }
         }
     }
-    pub fn ppu_read(self: *Mmc1, add: u16) u8 {
+    pub fn ppu_read(self: *Mmc1, add: u14) u8 {
         return self.nrom.ppu_read(add);
     }
-    pub fn ppu_write(self: *Mmc1, add: u16, val: u8) void {
+    pub fn ppu_write(self: *Mmc1, add: u14, val: u8) void {
         self.nrom.ppu_write(add, val);
     }
 
@@ -313,10 +313,10 @@ pub const UxRom = struct {
             self.nrom.prg_rom0 = &self.prg_rom_banks.buffer[val & 0x0f];
         }
     }
-    pub fn ppu_read(self: *UxRom, add: u16) u8 {
+    pub fn ppu_read(self: *UxRom, add: u14) u8 {
         return self.nrom.ppu_read(add);
     }
-    pub fn ppu_write(self: *UxRom, add: u16, val: u8) void {
+    pub fn ppu_write(self: *UxRom, add: u14, val: u8) void {
         self.nrom.ppu_write(add, val);
     }
     pub fn cart(self: *UxRom) Cart {
