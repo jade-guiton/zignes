@@ -325,15 +325,19 @@ pub const Nes = struct {
     fn run_cpu_step(self: *Nes) void {
         const nmi_line: bool = self.ppu.nmi();
         if (nmi_line and !self.old_nmi) {
+            self.old_nmi = nmi_line;
             self.interrupt(true, false);
+            return;
         }
         self.old_nmi = nmi_line;
 
-        const irq: bool = self.apu.irq;
-        if (irq and !self.reg.p.i) {
+        const irq_line: bool = self.apu.irq;
+        if (irq_line and !self.reg.p.i and !self.old_irq) {
+            self.old_irq = irq_line;
             self.interrupt(false, false);
             return;
         }
+        self.old_irq = irq_line;
 
         if (self.trace) {
             std.debug.print("A={X:0>2} X={X:0>2} Y={X:0>2} P={X:0>2} S={X:0>2}  ${X:0>4}: ", .{ self.reg.a, self.reg.x, self.reg.y, self.get_flags_byte(false), self.reg.s, self.reg.pc });

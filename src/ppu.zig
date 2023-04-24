@@ -35,6 +35,8 @@ const LineSprite = struct {
     is_spr0: bool,
 };
 
+const power_up_period = 88974;
+
 pub const Ppu = struct {
     cart: Cart,
 
@@ -66,6 +68,9 @@ pub const Ppu = struct {
     ppu_latch: bool,
 
     cycle: u64,
+    line: u16,
+    dot: u16,
+    even_frame: bool,
     in_vblank: bool,
 
     pub fn init(cart: Cart) Ppu {
@@ -96,6 +101,9 @@ pub const Ppu = struct {
             .fine_x_scroll = 0,
             .ppu_latch = false,
             .cycle = 0,
+            .line = 0,
+            .dot = 0,
+            .even_frame = false,
             .in_vblank = false,
         };
     }
@@ -134,6 +142,7 @@ pub const Ppu = struct {
     pub fn cpu_write(self: *Ppu, add: u16, val: u8) void {
         switch (add) {
             0x2000 => { // PPUCTRL
+                if (self.cycle <= power_up_period) return;
                 self.ctrl = .{
                     .add_inc = @intCast(u1, (val >> 2) & 1),
                     .spr_pat_table = @intCast(u1, (val >> 3) & 1),
@@ -144,6 +153,7 @@ pub const Ppu = struct {
                 copy_bits(2, 0, 10, &self.temp_ppu_addr, val);
             },
             0x2001 => { // PPUMASK
+                if (self.cycle <= power_up_period) return;
                 self.mask = val;
             },
             0x2003 => { // OAMADDR
@@ -154,6 +164,7 @@ pub const Ppu = struct {
                 self.oam_addr +%= 1;
             },
             0x2005 => { // PPUSCROLL
+                if (self.cycle <= power_up_period) return;
                 if (self.ppu_latch) {
                     copy_bits(5, 3, 5, &self.temp_ppu_addr, val);
                     copy_bits(3, 0, 12, &self.temp_ppu_addr, val);
@@ -164,6 +175,7 @@ pub const Ppu = struct {
                 self.ppu_latch = !self.ppu_latch;
             },
             0x2006 => { // PPUADDR
+                if (self.cycle <= power_up_period) return;
                 if (self.ppu_latch) {
                     self.temp_ppu_addr &= 0x7f00;
                     self.temp_ppu_addr |= val;
@@ -204,52 +216,27 @@ pub const Ppu = struct {
         }
     }
 
-    pub fn frame_no(self: *Ppu) u64 {
-        return self.cycle / 341 / 262;
+    fn idle(self: *Ppu, dots: u16) void {
+        self.line += dots / 341;
+        self.dot += dots % 341;
+        if (self.dot >= 341) {
+            self.dot -= 341;
+            self.line += 1;
+        }
+        if (self.line >= 262) {
+            self.line -= 262;
+        }
+        self.cycle += dots;
     }
 
     pub fn run_step(self: *Ppu) void {
-        const line_no = self.cycle / 341;
-        const line_cycle = self.cycle % 341;
-        const line = @intCast(i32, line_no % 262) - 1;
-
         const bg_en = (self.mask >> 3) & 1 == 1;
         const spr_en = (self.mask >> 4) & 1 == 1;
 
         // Note: All the timings are wrong. Good enough for now.
 
-        if (line == -1) { // Pre-render scanline
-            if (line_cycle == 0) {
-                self.in_vblank = false;
-                self.cycle += 1;
-            } else if (line_cycle == 1) {
-                self.status &= 0x3f; // Clear VBlank flag and Sprite 0 hit
-                self.cycle += 256;
-            } else if (line_cycle == 257) {
-                if (bg_en) {
-                    // Copy horizontal position bits
-                    copy_bits(5, 0, 0, &self.cur_ppu_addr, self.temp_ppu_addr);
-                    copy_bits(1, 10, 10, &self.cur_ppu_addr, self.temp_ppu_addr);
-                }
-
-                self.oam_addr = 0;
-                self.cycle += 23;
-            } else if (280 <= line_cycle and line_cycle <= 304) {
-                if (bg_en) {
-                    // Copy vertical bits
-                    copy_bits(5, 5, 5, &self.cur_ppu_addr, self.temp_ppu_addr);
-                    copy_bits(4, 11, 11, &self.cur_ppu_addr, self.temp_ppu_addr);
-                }
-
-                self.cycle += 1;
-                if (line_cycle == 304) {
-                    self.cycle += 36;
-                }
-            } else {
-                unreachable;
-            }
-        } else if (line < 240) { // Visible scanlines
-            if (line_cycle == 0) {
+        if (self.line < 240) { // Visible scanlines
+            if (self.dot == 0) {
                 // Sprite evaluation + tile data fetch
                 const tall_sprites = self.ctrl.spr_size == 1;
                 const sprite_h: u8 = if (tall_sprites) 16 else 8;
@@ -258,9 +245,9 @@ pub const Ppu = struct {
                     var y = self.oam[spr_i * 4];
                     if (y >= 0xef) continue;
                     y += 1;
-                    if (y > line or y + sprite_h <= line) continue;
-                    var bottom = tall_sprites and line - y >= 8;
-                    var row = @intCast(u14, (line - y) & 7);
+                    if (y > self.line or y + sprite_h <= self.line) continue;
+                    var bottom = tall_sprites and self.line - y >= 8;
+                    var row = @intCast(u14, (self.line - y) & 7);
 
                     var tile_bank: u14 = undefined;
                     var tile = @intCast(u14, self.oam[spr_i * 4 + 1]);
@@ -300,12 +287,12 @@ pub const Ppu = struct {
                     if (self.line_sprite_cnt == 8) break;
                 }
 
-                self.cycle += 1;
-            } else if (line_cycle <= 256) {
-                const y = @intCast(u64, line);
-                const x = line_cycle - 1;
+                self.idle(1);
+            } else if (self.dot <= 256) {
+                const y = @intCast(u64, self.line);
+                const x = self.dot - 1;
 
-                if (bg_en and ((x + self.fine_x_scroll) % 8 == 0 or line_cycle == 1)) { // Fetch tile
+                if (bg_en and ((x + self.fine_x_scroll) % 8 == 0 or self.dot == 1)) { // Fetch tile
                     const nt_add = @intCast(u14, 0x2000 + (self.cur_ppu_addr & 0x0fff));
                     const nt_byte = @intCast(u14, self.read(nt_add));
                     const tile_x = self.cur_ppu_addr & 0x1f;
@@ -361,8 +348,8 @@ pub const Ppu = struct {
                     bg_pix = @intCast(u2, (hi << 1) | lo);
                 }
 
-                const mask_bg = line_cycle > 8 or ((self.mask >> 1) & 1) == 1;
-                const mask_spr = line_cycle > 8 or ((self.mask >> 2) & 1) == 1;
+                const mask_bg = self.dot > 8 or ((self.mask >> 1) & 1) == 1;
+                const mask_spr = self.dot > 8 or ((self.mask >> 2) & 1) == 1;
 
                 var col: u8 = undefined;
                 if (bg_pix != 0 and (spr_pix == 0 or spr_prio) and mask_bg) {
@@ -375,11 +362,11 @@ pub const Ppu = struct {
                 self.buffer[y][x] = render_palette[col];
 
                 // Sprite 0 hit
-                if (spr_pix != 0 and is_spr0 and bg_pix != 0 and (self.mask >> 3) & 3 == 3 and mask_bg and mask_spr and line_cycle != 256) {
+                if (spr_pix != 0 and is_spr0 and bg_pix != 0 and (self.mask >> 3) & 3 == 3 and mask_bg and mask_spr and self.dot != 256) {
                     self.status |= 0x40;
                 }
 
-                if (line_cycle == 256 and bg_en) { // Increment vertical position
+                if (self.dot == 256 and bg_en) { // Increment vertical position
                     if ((self.cur_ppu_addr & 0x7000) != 0x7000) { // if fine Y < 7
                         self.cur_ppu_addr +%= 0x1000; // increment fine Y
                     } else {
@@ -399,34 +386,70 @@ pub const Ppu = struct {
                     }
                 }
 
-                self.cycle += 1;
-            } else if (line_cycle <= 320) {
-                if (line_cycle == 257 and bg_en) { // Copy horizontal position bits
+                self.idle(1);
+            } else if (self.dot <= 320) {
+                if (self.dot == 257 and bg_en) { // Copy horizontal position bits
                     copy_bits(5, 0, 0, &self.cur_ppu_addr, self.temp_ppu_addr);
                     copy_bits(1, 10, 10, &self.cur_ppu_addr, self.temp_ppu_addr);
                 }
 
                 self.oam_addr = 0;
-                self.cycle += 8;
-            } else if (line_cycle <= 336) {
-                self.cycle += 8;
-            } else if (line_cycle == 337) {
-                self.cycle += 4;
+                self.idle(8);
+            } else if (self.dot <= 336) {
+                self.idle(8);
+            } else if (self.dot == 337) {
+                self.idle(4);
             } else unreachable;
-        } else if (line == 240) { // Post-render scanline (idle)
-            if (line_cycle == 0) {
-                self.cycle += 341;
+        } else if (self.line == 240) { // Post-render scanline (idle)
+            if (self.dot == 0) {
+                self.idle(341);
             } else unreachable;
-        } else { // VBlank
-            if (line_cycle == 0) {
-                self.cycle += 1;
-            } else if (line_cycle == 1) {
+        } else if (self.line < 261) { // VBlank
+            if (self.dot == 0) {
+                self.idle(1);
+            } else if (self.dot == 1) {
                 if (!self.pending_vblank_clear) {
                     self.status |= 0x80; // Set VBlank flag
                 }
                 self.in_vblank = true;
-                self.cycle += 341 * 20 - 1;
+                self.idle(341 * 20 - 1);
             } else unreachable;
+        } else { // Pre-render scanline
+            if (self.dot == 0) {
+                self.even_frame = !self.even_frame;
+                self.in_vblank = false;
+                self.status &= 0xbf; // Clear Sprite 0 hit
+                self.idle(1);
+            } else if (self.dot == 1) {
+                self.status &= 0x7f; // Clear VBlank flag
+                self.idle(256);
+            } else if (self.dot == 257) {
+                if (bg_en) {
+                    // Copy horizontal position bits
+                    copy_bits(5, 0, 0, &self.cur_ppu_addr, self.temp_ppu_addr);
+                    copy_bits(1, 10, 10, &self.cur_ppu_addr, self.temp_ppu_addr);
+                }
+
+                self.oam_addr = 0;
+                self.idle(23);
+            } else if (280 <= self.dot and self.dot <= 304) {
+                if (bg_en) {
+                    // Copy vertical bits
+                    copy_bits(5, 5, 5, &self.cur_ppu_addr, self.temp_ppu_addr);
+                    copy_bits(4, 11, 11, &self.cur_ppu_addr, self.temp_ppu_addr);
+                }
+
+                self.idle(1);
+                if (self.dot == 305) {
+                    self.idle(36);
+                    if ((bg_en or spr_en) and !self.even_frame) {
+                        // Skip one cycle
+                        self.dot += 1;
+                    }
+                }
+            } else {
+                unreachable;
+            }
         }
         self.pending_vblank_clear = false;
     }
