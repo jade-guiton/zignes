@@ -14,29 +14,28 @@ pub const Cart = struct {
         const ptr_info = @typeInfo(Ptr);
         if (ptr_info != .Pointer) @compileError("ptr must be a pointer");
         if (ptr_info.Pointer.size != .One) @compileError("ptr must be a single item pointer");
-        const alignment = ptr_info.Pointer.alignment;
         const Impl = struct {
             pub fn deinit(self_opaque: *anyopaque, alloc: Allocator) void {
-                const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
+                const self: Ptr = @ptrCast(@alignCast(self_opaque));
                 if (@hasDecl(ptr_info.Pointer.child, "deinit")) {
                     self.deinit(alloc);
                 }
                 alloc.destroy(self);
             }
             pub fn read_opt(self_opaque: *anyopaque, add: u16) ?u8 {
-                const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
+                const self: Ptr = @ptrCast(@alignCast(self_opaque));
                 return ptr_info.Pointer.child.read_opt(self, add);
             }
             pub fn write(self_opaque: *anyopaque, add: u16, val: u8) void {
-                const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
+                const self: Ptr = @ptrCast(@alignCast(self_opaque));
                 return ptr_info.Pointer.child.write(self, add, val);
             }
             pub fn ppu_read(self_opaque: *anyopaque, add: u14) u8 {
-                const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
+                const self: Ptr = @ptrCast(@alignCast(self_opaque));
                 return ptr_info.Pointer.child.ppu_read(self, add);
             }
             pub fn ppu_write(self_opaque: *anyopaque, add: u14, val: u8) void {
-                const self = @ptrCast(Ptr, @alignCast(alignment, self_opaque));
+                const self: Ptr = @ptrCast(@alignCast(self_opaque));
                 return ptr_info.Pointer.child.ppu_write(self, add, val);
             }
         };
@@ -246,20 +245,20 @@ pub const Mmc1 = struct {
                 self.sh_reg_cnt = 0;
             } else {
                 // self.sh_reg = (self.sh_reg << 1) | @intCast(u5, (val & 1));
-                self.sh_reg |= @intCast(u5, (val & 1)) << @intCast(u3, self.sh_reg_cnt);
+                self.sh_reg |= @as(u5, @intCast(val & 1)) << @intCast(self.sh_reg_cnt);
                 self.sh_reg_cnt += 1;
                 if (self.sh_reg_cnt == 5) {
-                    const reg = @intCast(u2, (add >> 13) & 3);
+                    const reg: u2 = @intCast((add >> 13) & 3);
                     switch (reg) {
                         0 => { // Control
-                            self.nrom.nt_mirroring = switch (@intCast(u2, self.sh_reg & 3)) {
+                            self.nrom.nt_mirroring = switch (@as(u2, @intCast(self.sh_reg & 3))) {
                                 0 => NtMirroring.OneLower,
                                 1 => NtMirroring.OneUpper,
                                 2 => NtMirroring.Ver,
                                 3 => NtMirroring.Hor,
                             };
-                            self.prg_mode = @intCast(u2, (self.sh_reg >> 2) & 3);
-                            self.chr_mode = @intCast(u1, (self.sh_reg >> 4) & 1);
+                            self.prg_mode = @intCast((self.sh_reg >> 2) & 3);
+                            self.chr_mode = @intCast((self.sh_reg >> 4) & 1);
                         },
                         1 => { // CHR bank 0
                             self.chr0_sel = self.sh_reg;

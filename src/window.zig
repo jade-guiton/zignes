@@ -3,7 +3,7 @@ const sdl2 = @cImport(@cInclude("SDL2/SDL.h"));
 
 fn sdl_error() noreturn {
     std.debug.print("SDL error: {s}\n", .{sdl2.SDL_GetError()});
-    std.os.exit(1);
+    std.process.exit(1);
 }
 fn sdl_check(err: c_int) void {
     if (err != 0) sdl_error();
@@ -25,10 +25,10 @@ pub fn Window(comptime width: i32, comptime height: i32, comptime scale: i32) ty
         pub fn init(title: [*c]const u8) Self {
             sdl_check(sdl2.SDL_Init(sdl2.SDL_INIT_VIDEO | sdl2.SDL_INIT_AUDIO));
             _ = sdl2.SDL_SetHint(sdl2.SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
-            var win: *sdl2.SDL_Window = sdl2.SDL_CreateWindow(title, sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED, width * scale, height * scale + top_margin, sdl2.SDL_WINDOW_SHOWN) orelse sdl_error();
-            var ren: *sdl2.SDL_Renderer = sdl2.SDL_CreateRenderer(win, -1, sdl2.SDL_RENDERER_ACCELERATED | sdl2.SDL_RENDERER_PRESENTVSYNC) orelse sdl_error();
-            var debug = DebugPrinter.init(ren);
-            var buffer = sdl2.SDL_CreateTexture(ren, sdl2.SDL_PIXELFORMAT_RGB24, sdl2.SDL_TEXTUREACCESS_STREAMING, width, height);
+            const win: *sdl2.SDL_Window = sdl2.SDL_CreateWindow(title, sdl2.SDL_WINDOWPOS_CENTERED, sdl2.SDL_WINDOWPOS_CENTERED, width * scale, height * scale + top_margin, sdl2.SDL_WINDOW_SHOWN) orelse sdl_error();
+            const ren: *sdl2.SDL_Renderer = sdl2.SDL_CreateRenderer(win, -1, sdl2.SDL_RENDERER_ACCELERATED | sdl2.SDL_RENDERER_PRESENTVSYNC) orelse sdl_error();
+            const debug = DebugPrinter.init(ren);
+            const buffer = sdl2.SDL_CreateTexture(ren, sdl2.SDL_PIXELFORMAT_RGB24, sdl2.SDL_TEXTUREACCESS_STREAMING, width, height);
             if (buffer == null) sdl_error();
             const desired_audio = sdl2.SDL_AudioSpec{
                 .freq = 44100,
@@ -47,7 +47,7 @@ pub fn Window(comptime width: i32, comptime height: i32, comptime scale: i32) ty
         }
 
         pub fn queue_audio(self: *Self, buffer: anytype) void {
-            sdl_check(sdl2.SDL_QueueAudio(self.audio_device, &buffer.buffer, @intCast(u32, buffer.len * 2)));
+            sdl_check(sdl2.SDL_QueueAudio(self.audio_device, &buffer.buffer, @intCast(buffer.len * 2)));
             const queued = sdl2.SDL_GetQueuedAudioSize(self.audio_device);
             if (queued > 44100 / 30 * 2) {
                 sdl2.SDL_PauseAudioDevice(self.audio_device, 0);
@@ -58,8 +58,14 @@ pub fn Window(comptime width: i32, comptime height: i32, comptime scale: i32) ty
             var pixels: ?*anyopaque = undefined;
             var pitch: i32 = undefined;
             sdl_check(sdl2.SDL_LockTexture(self.buffer, null, &pixels, &pitch));
+            const pitchUsize = @as(usize, @intCast(pitch));
+            const dst = @as([*]u8, @ptrCast(pixels));
             for (0..height) |y| {
-                std.mem.copy(u8, @ptrCast(*[width * 3]u8, &@ptrCast([*]u8, pixels)[@intCast(usize, pitch) * y]), @ptrCast(*[width * 3]u8, &buffer[y]));
+                for (0..width) |x| {
+                    for (0..3) |c| {
+                        dst[y*pitchUsize + x*3 + c] = buffer[y][x][c];
+                    }
+                }
             }
             sdl2.SDL_UnlockTexture(self.buffer);
         }

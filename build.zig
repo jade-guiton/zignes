@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
     const exe = b.addExecutable(.{
         .name = "zignes",
         .root_source_file = .{ .path = "src/main.zig" },
@@ -11,10 +12,9 @@ pub fn build(b: *std.Build) void {
     });
     exe.linkSystemLibrary("sdl2");
     exe.linkLibC();
-    exe.install();
+    b.installArtifact(exe);
 
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
+    const run_cmd = b.addRunArtifact(exe);
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
@@ -27,5 +27,5 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const test_step = b.step("nestest", "Run tests with NesTest ROM");
-    test_step.dependOn(&exe_tests.run().step);
+    test_step.dependOn(&b.addRunArtifact(exe_tests).step);
 }

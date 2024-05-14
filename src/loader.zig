@@ -30,7 +30,7 @@ fn read_alloc(alloc: Allocator, in_stream: anytype, size: usize) ![]u8 {
     return prg_rom;
 }
 fn read_alloc_static(alloc: Allocator, in_stream: anytype, comptime size: usize) !*[size]u8 {
-    const prg_rom = @ptrCast(*[size]u8, try alloc.alloc(u8, size));
+    const prg_rom = @as(*[size]u8, @ptrCast(try alloc.alloc(u8, size)));
     if (try in_stream.readAll(prg_rom) != prg_rom.len) {
         return CartLoadError.UnexpectedEof;
     }
@@ -60,7 +60,7 @@ fn load_cart(alloc: Allocator, in_stream: anytype) !mappers.Cart {
     const nt_mirroring = if (four_screen) NtMirroring.Four else if (ver_mirroring) NtMirroring.Ver else NtMirroring.Hor;
     const has_prg_ram = (header[6] >> 1) & 1 == 1;
     const has_trainer = (header[6] >> 2) & 1 == 1;
-    var mapper_no = (header[7] & 0xf0) | (header[6] >> 4);
+    const mapper_no = (header[7] & 0xf0) | (header[6] >> 4);
     std.debug.print("PRG size = {d}, CHR size = {d}, Mapper = {x:0>2}\n", .{ prg_rom_size, chr_rom_size, mapper_no });
 
     if (has_trainer) return CartLoadError.UnsupportedRom;
@@ -70,7 +70,7 @@ fn load_cart(alloc: Allocator, in_stream: anytype) !mappers.Cart {
             if ((prg_rom_size != 1 and prg_rom_size != 2) or chr_rom_size > 1 or nt_mirroring == NtMirroring.Four)
                 return CartLoadError.UnsupportedRom;
 
-            var prg_rom0 = try read_alloc_static(alloc, in_stream, 16 * 1024);
+            const prg_rom0 = try read_alloc_static(alloc, in_stream, 16 * 1024);
             var prg_rom1: ?*[16 * 1024]u8 = null;
             if (prg_rom_size == 2) {
                 prg_rom1 = try read_alloc_static(alloc, in_stream, 16 * 1024);
@@ -78,15 +78,15 @@ fn load_cart(alloc: Allocator, in_stream: anytype) !mappers.Cart {
 
             var prg_ram: ?*[8 * 1024]u8 = null;
             if (has_prg_ram) {
-                prg_ram = @ptrCast(*[8 * 1024]u8, try alloc.alloc(u8, 8 * 1024));
+                prg_ram = @ptrCast(try alloc.alloc(u8, 8 * 1024));
             }
 
             var chr0: *[4 * 1024]u8 = undefined;
             var chr1: *[4 * 1024]u8 = undefined;
             var is_chr_ram: bool = false;
             if (chr_rom_size == 0) {
-                chr0 = @ptrCast(*[4 * 1024]u8, try alloc.alloc(u8, 4 * 1024));
-                chr1 = @ptrCast(*[4 * 1024]u8, try alloc.alloc(u8, 4 * 1024));
+                chr0 = @ptrCast(try alloc.alloc(u8, 4 * 1024));
+                chr1 = @ptrCast(try alloc.alloc(u8, 4 * 1024));
                 is_chr_ram = true;
             } else {
                 chr0 = try read_alloc_static(alloc, in_stream, 4 * 1024);
@@ -98,24 +98,24 @@ fn load_cart(alloc: Allocator, in_stream: anytype) !mappers.Cart {
             return mapper.cart();
         },
         1 => { // MMC1
-            if (prg_rom_size > 16 or (chr_rom_size != 16 and chr_rom_size != 0) or nt_mirroring == NtMirroring.Four)
+            if (prg_rom_size > 16 or chr_rom_size > 16 or nt_mirroring == NtMirroring.Four)
                 return CartLoadError.UnsupportedRom;
 
             var prg_rom_banks: std.BoundedArray([16 * 1024]u8, 16) = undefined;
-            prg_rom_banks.len = prg_rom_size;
+            prg_rom_banks.len = @intCast(prg_rom_size);
             for (0..prg_rom_size) |i| {
                 prg_rom_banks.set(i, try read_static(in_stream, 16 * 1024));
             }
 
-            var prg_ram_banks: [4][8 * 1024]u8 = undefined;
+            const prg_ram_banks: [4][8 * 1024]u8 = undefined;
 
             var chr_banks: [32][4 * 1024]u8 = undefined;
             var is_chr_ram = true;
-            if (chr_rom_size == 16) {
-                for (0..16) |i| {
+            if (chr_rom_size > 0) {
+                is_chr_ram = false;
+                for (0..chr_rom_size*2) |i| {
                     chr_banks[i] = try read_static(in_stream, 4 * 1024);
                 }
-                is_chr_ram = false;
             }
 
             var mapper = try alloc.create(mappers.Mmc1);
@@ -127,7 +127,7 @@ fn load_cart(alloc: Allocator, in_stream: anytype) !mappers.Cart {
                 return CartLoadError.UnsupportedRom;
 
             var prg_rom_banks: std.BoundedArray([16 * 1024]u8, 16) = undefined;
-            prg_rom_banks.len = prg_rom_size;
+            prg_rom_banks.len = @intCast(prg_rom_size);
             for (0..prg_rom_size) |i| {
                 prg_rom_banks.set(i, try read_static(in_stream, 16 * 1024));
             }

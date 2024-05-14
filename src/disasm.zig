@@ -313,7 +313,7 @@ pub fn disasm(nes: *Nes, add: u16, writer: anytype) !void {
             .A => try writer.writeAll("A"),
             .Imm => try std.fmt.format(writer, "#{x:0>2}", .{nes.read(add +% 1)}),
             .Rel => {
-                const jump = @bitCast(i8, nes.read(add +% 1));
+                const jump = @as(i8, @bitCast(nes.read(add +% 1)));
                 if (jump > 0) {
                     try std.fmt.format(writer, "*+{d}", .{jump});
                 } else {

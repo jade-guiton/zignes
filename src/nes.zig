@@ -22,9 +22,6 @@ fn arg_imm(x: u8) Arg {
     return Arg{ .imm = x };
 }
 
-fn bool_byte(b: bool) u8 {
-    return if (b) 1 else 0;
-}
 fn get_bit(b: u8, n: u8) bool {
     return (b >> n) & 1 == 1;
 }
@@ -109,14 +106,14 @@ pub const Nes = struct {
 
     pub fn get_flags_byte(self: *Nes, b_flag: bool) u8 {
         // zig fmt: off
-        return bool_byte(self.reg.p.c)
-            | (bool_byte(self.reg.p.z) << 1)
-            | (bool_byte(self.reg.p.i) << 2)
-            | (bool_byte(self.reg.p.d) << 3)
-            | (bool_byte(b_flag) << 4)
+        return @intFromBool(self.reg.p.c)
+            | (@as(u8, @intFromBool(self.reg.p.z)) << 1)
+            | (@as(u8, @intFromBool(self.reg.p.i)) << 2)
+            | (@as(u8, @intFromBool(self.reg.p.d)) << 3)
+            | (@as(u8, @intFromBool(b_flag)) << 4)
             | (1 << 5)
-            | (bool_byte(self.reg.p.v) << 6)
-            | (bool_byte(self.reg.p.n) << 7);
+            | (@as(u8, @intFromBool(self.reg.p.v)) << 6)
+            | (@as(u8, @intFromBool(self.reg.p.n)) << 7);
         // zig fmt: on
     }
 
@@ -179,9 +176,9 @@ pub const Nes = struct {
             self.apu.write(add, val);
         } else if (add == 0x4014) { // OAMDMA
             // Do entire DMA at once; not very accurate but simple
-            const base = @intCast(u16, val) << 8;
+            const base = @as(u16, @intCast(val)) << 8;
             for (0..256) |i| {
-                self.ppu.oam[self.ppu.oam_addr +% @intCast(u8, i)] = self.read_cycle(base | @intCast(u16, i));
+                self.ppu.oam[self.ppu.oam_addr +% @as(u8, @intCast(i))] = self.read_cycle(base | @as(u16, @intCast(i)));
                 self.cpu_cycle += 1;
             }
         } else if (add == 0x4016) { // Controller
@@ -266,14 +263,14 @@ pub const Nes = struct {
         const res = lhs +% rhs +% c;
         self.reg.p.c = res >> 8 == 1;
         self.reg.p.v = (res ^ lhs) & (res ^ rhs) & 0x80 != 0;
-        self.reg.a = @intCast(u8, res & 0xff);
+        self.reg.a = @intCast(res & 0xff);
         self.set_zn(self.reg.a);
     }
 
     fn branch(self: *Nes, cond: bool) void {
-        const rel = @bitCast(i8, self.fetch());
+        const rel: i8 = @bitCast(self.fetch());
         if (cond) {
-            const target = self.reg.pc +% @bitCast(u16, @as(i16, rel));
+            const target = self.reg.pc +% @as(u16, @bitCast(@as(i16, rel)));
             if (target & 0xff00 != self.reg.pc & 0xff00) self.cpu_cycle += 1;
             self.cpu_cycle += 1;
             self.reg.pc = target;
@@ -281,23 +278,23 @@ pub const Nes = struct {
     }
 
     fn push(self: *Nes, b: u8) void {
-        self.write(0x0100 | @intCast(u16, self.reg.s), b);
+        self.write(0x0100 | @as(u16, @intCast(self.reg.s)), b);
         self.reg.s -%= 1;
     }
     fn push16(self: *Nes, w: u16) void {
-        self.push(@intCast(u8, w >> 8));
-        self.push(@intCast(u8, w & 0xff));
+        self.push(@intCast(w >> 8));
+        self.push(@intCast(w & 0xff));
     }
     fn pull(self: *Nes) u8 {
         self.reg.s +%= 1;
-        const val = self.read_cycle(0x0100 | @intCast(u16, self.reg.s));
+        const val = self.read_cycle(0x0100 | @as(u16, @intCast(self.reg.s)));
         return val;
     }
     fn pull16(self: *Nes) u16 {
         const lo = self.pull();
         const hi = self.pull();
         self.cpu_cycle -= 1; // only 1 extra cpu_cycle
-        return (@intCast(u16, hi) << 8) | @intCast(u16, lo);
+        return (@as(u16, @intCast(hi)) << 8) | @as(u16, @intCast(lo));
     }
     fn pull_flags(self: *Nes) void {
         const flags = self.pull();
@@ -524,7 +521,7 @@ pub const Nes = struct {
                     },
                     0x20 => { // ROL
                         const b = self.read_arg(arg);
-                        const res = (b << 1) | bool_byte(self.reg.p.c);
+                        const res = (b << 1) | @intFromBool(self.reg.p.c);
                         self.write_arg(arg, res);
                         self.reg.p.c = b >> 7 == 1;
                         self.set_zn(res);
@@ -542,7 +539,7 @@ pub const Nes = struct {
                     },
                     0x60 => { // ROR
                         const b = self.read_arg(arg);
-                        const res = (b >> 1) | (bool_byte(self.reg.p.c) << 7);
+                        const res = (b >> 1) | (@as(u8, @intFromBool(self.reg.p.c)) << 7);
                         self.write_arg(arg, res);
                         self.reg.p.c = b & 1 == 1;
                         self.set_zn(res);

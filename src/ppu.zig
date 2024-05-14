@@ -1,7 +1,7 @@
 const std = @import("std");
 const Cart = @import("./mapper.zig").Cart;
 
-const render_palette = @ptrCast(*const [64][3]u8, @embedFile("palette.pal"));
+const render_palette: *const [64][3]u8 = @ptrCast(@embedFile("palette.pal"));
 
 fn copy_bits(comptime nb_bits: comptime_int, comptime src_off: comptime_int, comptime dst_off: comptime_int, dst_ptr: anytype, src: anytype) void {
     const Src = @TypeOf(src);
@@ -24,7 +24,7 @@ fn copy_bits(comptime nb_bits: comptime_int, comptime src_off: comptime_int, com
 
     const bit_mask = (1 << nb_bits) - 1;
     const dst_mask = ~@as(Dst, bit_mask << dst_off);
-    dst_ptr.* = (dst_ptr.* & dst_mask) | (@intCast(Dst, (src >> src_off) & bit_mask) << dst_off);
+    dst_ptr.* = (dst_ptr.* & dst_mask) | (@as(Dst, @intCast((src >> src_off) & bit_mask)) << dst_off);
 }
 
 const LineSprite = struct {
@@ -123,7 +123,7 @@ pub const Ppu = struct {
             0x2004 => return self.oam[self.oam_addr], // OAMDATA
             0x2007 => { // PPUDATA
                 var val: u8 = undefined;
-                const ppu_addr = @intCast(u14, self.cur_ppu_addr & 0x3fff);
+                const ppu_addr: u14 = @intCast(self.cur_ppu_addr & 0x3fff);
                 if (add < 0x3f00) { // Go through buffer
                     val = self.ppu_data_buf;
                     self.ppu_data_buf = self.read(ppu_addr);
@@ -144,10 +144,10 @@ pub const Ppu = struct {
             0x2000 => { // PPUCTRL
                 if (self.cycle <= power_up_period) return;
                 self.ctrl = .{
-                    .add_inc = @intCast(u1, (val >> 2) & 1),
-                    .spr_pat_table = @intCast(u1, (val >> 3) & 1),
-                    .bg_pat_table = @intCast(u1, (val >> 4) & 1),
-                    .spr_size = @intCast(u1, (val >> 5) & 1),
+                    .add_inc = @intCast((val >> 2) & 1),
+                    .spr_pat_table = @intCast((val >> 3) & 1),
+                    .bg_pat_table = @intCast((val >> 4) & 1),
+                    .spr_size = @intCast((val >> 5) & 1),
                     .vbl_nmi = (val >> 7) & 1 == 1,
                 };
                 copy_bits(2, 0, 10, &self.temp_ppu_addr, val);
@@ -170,7 +170,7 @@ pub const Ppu = struct {
                     copy_bits(3, 0, 12, &self.temp_ppu_addr, val);
                 } else {
                     copy_bits(5, 3, 0, &self.temp_ppu_addr, val);
-                    self.fine_x_scroll = @intCast(u3, val & 7);
+                    self.fine_x_scroll = @intCast(val & 7);
                 }
                 self.ppu_latch = !self.ppu_latch;
             },
@@ -182,12 +182,12 @@ pub const Ppu = struct {
                     self.cur_ppu_addr = self.temp_ppu_addr;
                 } else {
                     self.temp_ppu_addr &= 0x00ff;
-                    self.temp_ppu_addr |= @intCast(u15, val & 0x3f) << 8;
+                    self.temp_ppu_addr |= @as(u15, @intCast(val & 0x3f)) << 8;
                 }
                 self.ppu_latch = !self.ppu_latch;
             },
             0x2007 => { // PPUDATA
-                self.write(@intCast(u14, self.cur_ppu_addr & 0x3fff), val);
+                self.write(@intCast(self.cur_ppu_addr & 0x3fff), val);
                 const inc = if (self.ctrl.add_inc == 1) @as(u15, 32) else @as(u15, 1);
                 self.cur_ppu_addr +%= inc;
             },
@@ -247,10 +247,10 @@ pub const Ppu = struct {
                     y += 1;
                     if (y > self.line or y + sprite_h <= self.line) continue;
                     var bottom = tall_sprites and self.line - y >= 8;
-                    var row = @intCast(u14, (self.line - y) & 7);
+                    var row: u14 = @intCast((self.line - y) & 7);
 
                     var tile_bank: u14 = undefined;
-                    var tile = @intCast(u14, self.oam[spr_i * 4 + 1]);
+                    var tile: u14 = @intCast(self.oam[spr_i * 4 + 1]);
                     if (tall_sprites) {
                         tile_bank = tile & 1;
                         tile &= 0xfe;
@@ -261,7 +261,7 @@ pub const Ppu = struct {
                     var sprite: LineSprite = undefined;
                     sprite.is_spr0 = spr_i == 0;
                     const attr = self.oam[spr_i * 4 + 2];
-                    sprite.pal = @intCast(u2, attr & 3);
+                    sprite.pal = @intCast(attr & 3);
                     sprite.prio = (attr >> 5) & 1 == 1;
                     const flip_x = (attr >> 6) & 1 == 1;
                     const flip_y = (attr >> 7) & 1 == 1;
@@ -278,8 +278,8 @@ pub const Ppu = struct {
                     const pt_lo = self.read(pt_add + tile * 16 + row);
                     const pt_hi = self.read(pt_add + tile * 16 + 8 + row);
                     for (0..8) |i| {
-                        const pi = if (flip_x) @intCast(u3, i) else @intCast(u3, 7 - i);
-                        sprite.pat[i] = @intCast(u2, (((pt_hi >> pi) & 1) << 1) | ((pt_lo >> pi) & 1));
+                        const pi: u3 = if (flip_x) @intCast(i) else @intCast(7 - i);
+                        sprite.pat[i] = @intCast((((pt_hi >> pi) & 1) << 1) | ((pt_lo >> pi) & 1));
                     }
 
                     self.line_sprites[self.line_sprite_cnt] = sprite;
@@ -289,21 +289,21 @@ pub const Ppu = struct {
 
                 self.idle(1);
             } else if (self.dot <= 256) {
-                const y = @intCast(u64, self.line);
+                const y: u64 = @intCast(self.line);
                 const x = self.dot - 1;
 
                 if (bg_en and ((x + self.fine_x_scroll) % 8 == 0 or self.dot == 1)) { // Fetch tile
-                    const nt_add = @intCast(u14, 0x2000 + (self.cur_ppu_addr & 0x0fff));
-                    const nt_byte = @intCast(u14, self.read(nt_add));
+                    const nt_add: u14 = @intCast(0x2000 + (self.cur_ppu_addr & 0x0fff));
+                    const nt_byte: u14 = @intCast(self.read(nt_add));
                     const tile_x = self.cur_ppu_addr & 0x1f;
                     const tile_y = (self.cur_ppu_addr >> 5) & 0x1f;
-                    const at_add = @intCast(u14, 0x23c0 + (self.cur_ppu_addr & 0x0c00) + tile_y / 4 * 8 + tile_x / 4);
+                    const at_add: u14 = @intCast(0x23c0 + (self.cur_ppu_addr & 0x0c00) + tile_y / 4 * 8 + tile_x / 4);
                     const at_byte = self.read(at_add);
-                    const at_area = @intCast(u3, tile_y % 4 / 2 * 2 + tile_x % 4 / 2);
-                    self.line_at_pal = @intCast(u2, (at_byte >> (at_area * 2)) & 3);
+                    const at_area: u3 = @intCast(tile_y % 4 / 2 * 2 + tile_x % 4 / 2);
+                    self.line_at_pal = @intCast((at_byte >> (at_area * 2)) & 3);
 
-                    const pt_add = @intCast(u14, self.ctrl.bg_pat_table) * 0x1000;
-                    const pix_y = @intCast(u14, self.cur_ppu_addr >> 12);
+                    const pt_add = @as(u14, @intCast(self.ctrl.bg_pat_table)) * 0x1000;
+                    const pix_y: u14 = @intCast(self.cur_ppu_addr >> 12);
                     self.line_pt_lo = self.read(pt_add + nt_byte * 16 + pix_y);
                     self.line_pt_hi = self.read(pt_add + nt_byte * 16 + 8 + pix_y);
 
@@ -342,10 +342,10 @@ pub const Ppu = struct {
 
                 var bg_pix: u2 = 0;
                 if (bg_en) { // Background
-                    const pix_x = @intCast(u3, x & 0x7) +% self.fine_x_scroll;
+                    const pix_x = @as(u3, @intCast(x & 0x7)) +% self.fine_x_scroll;
                     const lo = (self.line_pt_lo >> (7 - pix_x)) & 1;
                     const hi = (self.line_pt_hi >> (7 - pix_x)) & 1;
-                    bg_pix = @intCast(u2, (hi << 1) | lo);
+                    bg_pix = @intCast((hi << 1) | lo);
                 }
 
                 const mask_bg = self.dot > 8 or ((self.mask >> 1) & 1) == 1;
@@ -353,9 +353,9 @@ pub const Ppu = struct {
 
                 var col: u8 = undefined;
                 if (bg_pix != 0 and (spr_pix == 0 or spr_prio) and mask_bg) {
-                    col = self.read(0x3f00 + @intCast(u14, 4 * @intCast(u16, self.line_at_pal) + @intCast(u16, bg_pix))) & 0x3f;
+                    col = self.read(0x3f00 + @as(u14, @intCast(4 * @as(u16, @intCast(self.line_at_pal)) + @as(u16, @intCast(bg_pix))))) & 0x3f;
                 } else if (spr_pix != 0 and mask_spr) {
-                    col = self.read(0x3f00 + @intCast(u14, 4 * (4 + @intCast(u16, spr_pal)) + @intCast(u16, spr_pix))) & 0x3f;
+                    col = self.read(0x3f00 + @as(u14, @intCast(4 * (4 + @as(u16, @intCast(spr_pal))) + @as(u16, @intCast(spr_pix))))) & 0x3f;
                 } else {
                     col = bg_col;
                 }
@@ -371,7 +371,7 @@ pub const Ppu = struct {
                         self.cur_ppu_addr +%= 0x1000; // increment fine Y
                     } else {
                         self.cur_ppu_addr &= ~@as(u15, 0x7000); // fine Y = 0
-                        var coarse_y = @intCast(u5, (self.cur_ppu_addr & 0x03e0) >> 5);
+                        var coarse_y: u5 = @intCast((self.cur_ppu_addr & 0x03e0) >> 5);
                         if (coarse_y == 29) {
                             coarse_y = 0;
                             self.cur_ppu_addr ^= 0x0800; // switch vertical nametable
@@ -382,7 +382,7 @@ pub const Ppu = struct {
                         }
                         // set new coarse y
                         self.cur_ppu_addr &= ~@as(u15, 0x03e0);
-                        self.cur_ppu_addr |= @intCast(u15, coarse_y) << 5;
+                        self.cur_ppu_addr |= @as(u15, @intCast(coarse_y)) << 5;
                     }
                 }
 

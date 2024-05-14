@@ -151,7 +151,7 @@ pub fn main() !u8 {
         last_frame = now;
         while (now > last_second + 1000) {
             last_second += 1000;
-            fps = @intCast(i32, nes.frame_no - last_frame_no);
+            fps = @intCast(nes.frame_no - last_frame_no);
             last_frame_no = nes.frame_no;
         }
     }

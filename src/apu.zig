@@ -60,18 +60,18 @@ fn Pulse(comptime is_pulse2: bool) type {
 
         fn set_reg(self: *Self, reg: u2, val: u8) void {
             if (reg == 0) {
-                self.duty = @intCast(u2, val >> 6);
+                self.duty = @intCast(val >> 6);
                 self.loop = (val >> 5) & 1 == 1;
                 self.no_env = (val >> 4) & 1 == 1;
-                self.volume = @intCast(u4, val & 0x0f);
+                self.volume = @intCast(val & 0x0f);
             } else if (reg == 1) {
                 if (val & 0x80 != 0) {
                     self.sweep = .{
-                        .period = @intCast(u3, (val >> 4) & 7),
+                        .period = @intCast((val >> 4) & 7),
                         .timer = 0,
                         .muted = false,
                         .negate = (val >> 3) & 1 == 1,
-                        .shift = @intCast(u3, val & 7),
+                        .shift = @intCast(val & 7),
                         .reload = true,
                     };
                 } else {
@@ -80,7 +80,7 @@ fn Pulse(comptime is_pulse2: bool) type {
             } else if (reg == 2) {
                 self.timer_period = (self.timer_period & 0x700) | val;
             } else if (reg == 3) {
-                self.timer_period = (self.timer_period & 0xff) | (@intCast(u11, val & 7) << 8);
+                self.timer_period = (self.timer_period & 0xff) | (@as(u11, @intCast(val & 7)) << 8);
                 if (self.enabled) {
                     self.length_ctr = length_ctr_table[val >> 3];
                 }
@@ -114,7 +114,7 @@ fn Pulse(comptime is_pulse2: bool) type {
                 self.length_ctr -= 1;
             }
             if (self.sweep) |*sweep| {
-                var change_amount = @intCast(u12, self.timer_period >> sweep.shift);
+                var change_amount: u12 = @intCast(self.timer_period >> sweep.shift);
                 if (sweep.negate) {
                     change_amount = ~change_amount;
                     if (is_pulse2) {
@@ -125,7 +125,7 @@ fn Pulse(comptime is_pulse2: bool) type {
 
                 sweep.muted = self.timer_period < 8 or target_period >= 0x800;
                 if (sweep.timer == 0 and !sweep.muted) {
-                    self.timer_period = @intCast(u11, target_period);
+                    self.timer_period = @intCast(target_period);
                 }
                 if (sweep.timer == 0 or sweep.reload) {
                     sweep.timer = sweep.period;
@@ -140,7 +140,7 @@ fn Pulse(comptime is_pulse2: bool) type {
             if (!self.enabled or self.timer_period < 8 or self.length_ctr == 0 or (self.sweep != null and self.sweep.?.muted)) return 0.0;
             const seq_out = pulse_seqs[self.duty][self.sequence_pos];
             const volume = if (self.no_env) self.volume else self.env_decay;
-            return @intToFloat(f32, seq_out * volume);
+            return @floatFromInt(seq_out * volume);
         }
     };
 }
@@ -173,11 +173,11 @@ const Triangle = struct {
     fn set_reg(self: *Triangle, reg: u2, val: u8) void {
         if (reg == 0) {
             self.control = (val >> 7) & 1 == 1;
-            self.linear_reload_value = @intCast(u7, val & 0x7f);
+            self.linear_reload_value = @intCast(val & 0x7f);
         } else if (reg == 2) {
             self.timer_period = (self.timer_period & 0x700) | val;
         } else if (reg == 3) {
-            self.timer_period = (self.timer_period & 0xff) | (@intCast(u11, val & 7) << 8);
+            self.timer_period = (self.timer_period & 0xff) | (@as(u11, @intCast(val & 7)) << 8);
             if (self.enabled) {
                 self.length_ctr = length_ctr_table[val >> 3];
             }
@@ -207,7 +207,7 @@ const Triangle = struct {
     fn sample(self: *Triangle) f32 {
         if (!self.enabled or self.timer_period < 8 or self.length_ctr == 0 or self.linear_ctr == 0) return 0.0;
         const seq_out = triangle_seq[self.sequence_pos];
-        return @intToFloat(f32, seq_out);
+        return @floatFromInt(seq_out);
     }
 };
 
@@ -248,12 +248,12 @@ const Noise = struct {
         if (reg == 0) {
             self.loop = (val >> 5) & 1 == 1;
             self.no_env = (val >> 4) & 1 == 1;
-            self.volume = @intCast(u4, val & 0x0f);
+            self.volume = @intCast(val & 0x0f);
         } else if (reg == 1) {
             // nothing here
         } else if (reg == 2) {
             self.timer_period = noise_periods[val & 0x0f];
-            self.mode = @intCast(u1, val >> 7);
+            self.mode = @intCast(val >> 7);
         } else if (reg == 3) {
             if (self.enabled) {
                 self.length_ctr = length_ctr_table[val >> 3];
@@ -293,7 +293,7 @@ const Noise = struct {
     fn sample(self: *Noise) f32 {
         if (!self.enabled or self.length_ctr == 0) return 0.0;
         const volume = if (self.no_env) self.volume else self.env_decay;
-        return @intToFloat(f32, (self.shift_reg & 1) * volume);
+        return @floatFromInt((self.shift_reg & 1) * volume);
     }
 };
 
@@ -377,13 +377,13 @@ pub const Apu = struct {
         if (add < 0x4000) {
             unreachable;
         } else if (add < 0x4004) {
-            self.pulse1.set_reg(@intCast(u2, add - 0x4000), val);
+            self.pulse1.set_reg(@intCast(add - 0x4000), val);
         } else if (add < 0x4008) {
-            self.pulse2.set_reg(@intCast(u2, add - 0x4004), val);
+            self.pulse2.set_reg(@intCast(add - 0x4004), val);
         } else if (add < 0x400c) {
-            self.triangle.set_reg(@intCast(u2, add - 0x4008), val);
+            self.triangle.set_reg(@intCast(add - 0x4008), val);
         } else if (add < 0x4010) {
-            self.noise.set_reg(@intCast(u2, add - 0x400c), val);
+            self.noise.set_reg(@intCast(add - 0x400c), val);
         } else if (add == 0x4015) {
             self.pulse1.enabled = val & 1 == 1;
             if (!self.pulse1.enabled) self.pulse1.length_ctr = 0;
@@ -394,7 +394,7 @@ pub const Apu = struct {
             self.noise.enabled = (val >> 3) & 1 == 1;
             if (!self.noise.enabled) self.noise.length_ctr = 0;
         } else if (add == 0x4017) {
-            self.seq_mode = @intCast(u1, (val >> 7) & 1);
+            self.seq_mode = @intCast((val >> 7) & 1);
             self.irq_inhibit = (val >> 6) & 1 == 1;
             self.seq_timer = 0;
             self.clock_linear();
@@ -489,7 +489,7 @@ pub const Apu = struct {
 
         const output = (pulse_out + tnd_out) * 0.25;
         const new_sample = self.filter1.apply(output);
-        self.buffer.append(@floatToInt(i16, @trunc(new_sample * 32_767))) catch {};
+        self.buffer.append(@intFromFloat(@trunc(new_sample * 32_767))) catch {};
         self.samples += 1;
     }
 
