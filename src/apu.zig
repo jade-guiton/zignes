@@ -181,7 +181,6 @@ const Triangle = struct {
             if (self.enabled) {
                 self.length_ctr = length_ctr_table[val >> 3];
             }
-            self.sequence_pos = 0;
             self.timer = 0;
             self.linear_reload = true;
         }
@@ -205,7 +204,7 @@ const Triangle = struct {
     }
 
     fn sample(self: *Triangle) f32 {
-        if (!self.enabled or self.timer_period < 8 or self.length_ctr == 0 or self.linear_ctr == 0) return 0.0;
+        if (self.timer_period < 2) return 7.0;
         const seq_out = triangle_seq[self.sequence_pos];
         return @floatFromInt(seq_out);
     }
@@ -350,7 +349,6 @@ pub const Apu = struct {
     seq_timer: u16,
     irq_inhibit: bool,
     irq: bool,
-    filter1: HighPass(10),
 
     pub fn init() Apu {
         return Apu{
@@ -365,7 +363,6 @@ pub const Apu = struct {
             .seq_timer = 0,
             .irq_inhibit = true,
             .irq = false,
-            .filter1 = HighPass(10).init(),
         };
     }
     pub fn read(self: *Apu, add: u16) u8 {
@@ -488,8 +485,7 @@ pub const Apu = struct {
         const tnd_out = 159.79 / (1 / (triangle / 8227 + noise / 12241 + dmc / 22638) + 100);
 
         const output = (pulse_out + tnd_out) * 0.25;
-        const new_sample = self.filter1.apply(output);
-        self.buffer.append(@intFromFloat(@trunc(new_sample * 32_767))) catch {};
+        self.buffer.append(@intFromFloat(@trunc(output * 32_767))) catch {};
         self.samples += 1;
     }
 
